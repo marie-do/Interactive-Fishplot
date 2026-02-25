@@ -1,0 +1,17 @@
+step;text
+1;Welcome to <b>Fishplot Interactive Editor</b>.<br><br>This guided tour will walk you step-by-step through the full workflow: loading data, editing clones, simulating drug effects, and visualizing clonal evolution.<br><br>Click <b>Next</b> to begin.
+2;Start here: load a JSON data file.<br><br>The file must follow the Fishplot structured format including:<br>• patient_id<br>• sample_id<br>• node hierarchy<br>• mutation names<br>• clonal proportions
+3;Select the patient you want to explore.<br><br>Each patient contains multiple timepoints describing clonal evolution over time.
+4;Select a timepoint.<br><br>All editing actions (mutation editing, deletion, percentage updates) apply to the selected timepoint.
+5;This button allows you to select drug effects:<br><br>• Select a drug from the list<br>• Apply its effect to the current timepoint<br><br>Drug effects are defined in the JSON file and automatically applied respecting clonal hierarchy.
+6;This button allows you to edit existing clones:<br><br>• Edit mutation names<br>• Update clonal proportions<br>• Delete mutations (with automatic rebalancing)<br><br>All edits maintain biological consistency.
+7;These buttons allow you to create new biological events:<br><br>• Add a new mutation (child clone)<br>• Create a new timepoint<br>• Simulate drug impact<br><br>The clonal hierarchy is always biologically constrained.
+8; These buttons allow you to delete a mutation or an entire timepoint.<br><br>Deletion automatically rebalances clonal proportions and maintains hierarchical constraints.
+9; This button allows you to add a new drug effect to the dataset.<br><br>Define the drug name, target mutation, and effect strength.<br><br>Drug effects are applied automatically during simulation.
+10;Use these visualization buttons to switch between:<br><br>• Fishplot view<br>• Mutation tree view<br>• Raw data table<br>• Computed matrix
+11;The Fishplot represents clonal evolution longitudinally.<br><br>Drug effects are applied between timepoints and automatically rebalanced to respect hierarchical constraints.
+12;The Mutation Tree view shows the biological parent-child structure.<br><br>You can click directly on nodes to edit clone percentages.
+13;The Data Matrix shows the final computed matrix after:<br><br>• Drug effects<br>• Zero reappearance correction<br>• Hierarchical constraints enforcement
+14;You can edit metadata fields here.<br><br>This allows integration of clinical annotations, sample information, or experimental context.
+15;You can save the modified dataset as a JSON file.<br><br>Drug effects and metadata are preserved in the exported structure.
+16;You are ready to explore and simulate clonal evolution.<br><br>Remember: biological constraints are always enforced automatically to maintain consistency.<br><br>Enjoy using Fishplot Interactive.
