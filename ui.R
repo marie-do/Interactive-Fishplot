@@ -1,23 +1,71 @@
-#ui
+# ui
 
-intro_steps <- read_delim(
-  "fishplot_tour.csv",
+help_steps <- read_delim(
+  "help_tour.csv",
   delim = ";",
   col_types = cols()
 )
 
-get_step <- function(n) {
-  step_text <- intro_steps$text[intro_steps$step == n]
-  if (length(step_text) == 0) return("")
-  step_text[[1]]
-}
-
-
 ui <- dashboardPage(
   skin = "blue",
   
-  
-  dashboardHeader(title = "Fishplot Interactive Editor"),
+  dashboardHeader(
+    title = tags$span(
+      "Fishplot Interactive",
+      'data-step' = 1,
+      'data-intro' = get_step(1),
+      style = "display:inline-block;"
+    ),
+    
+    dropdownMenu(
+      type = "notifications", 
+      headerText = strong("HELP"), 
+      icon = icon("question"), 
+      badgeStatus = NULL,
+      notificationItem(
+        text = (help_steps$text[1]),
+        icon = icon("upload")
+      ),
+      notificationItem(
+        text = help_steps$text[2],
+        icon = icon("user")
+      ),
+      notificationItem(
+        text = help_steps$text[3],
+        icon = icon("edit")
+      ),
+      notificationItem(
+        text = help_steps$text[4],
+        icon = icon("plus")
+      ),
+      notificationItem(
+        text = help_steps$text[5],
+        icon = icon("edit")
+      ),
+      notificationItem(
+        text = help_steps$text[6],
+        icon = icon("trash")
+      ),
+      notificationItem(
+        text = help_steps$text[7],
+        icon = icon("chart-area")
+      ),
+      notificationItem(
+        text = help_steps$text[8],
+        icon = icon("save")
+      )
+    ),
+    tags$li(
+      a(
+        strong("ABOUT THE APP"),
+        height = 40,
+        href = "https://github.com/marie-do/Interactive-Fishplot",
+        title = "",
+        target = "_blank"
+      ),
+      class = "dropdown"
+    )
+  ),
   
   dashboardSidebar(
     width = 300,
@@ -36,10 +84,11 @@ ui <- dashboardPage(
       downloadButton(
         "save_file",
         "Save modified data",
-        class = "btn-success"
+        class = "btn-success",
+        style = "width: 100%;"
       ),
-      data.step = 13,
-      data.intro = get_step(13)
+      data.step = 16,
+      data.intro = get_step(16)
     ),
     
     hr(),
@@ -87,21 +136,35 @@ ui <- dashboardPage(
     
     introBox(
       tagList(
-        actionButton("new_timepoint","Create new timepoint",icon=icon("plus"),class="btn-warning"),
-        actionButton("add_mutation","Create new mutation",icon=icon("plus"),class="btn-warning"),
-        actionButton("edit_drug_effect","Edit drug impact",icon=icon("flask"),class="btn-info")
+        actionButton("new_timepoint","Create new timepoint",
+                     icon=icon("plus"), class="btn-warning"),
+        actionButton("add_mutation","Create new mutation",
+                     icon=icon("plus"), class="btn-warning")
       ),
       data.step = 7,
       data.intro = get_step(7)
     ),
     
     introBox(
-      tagList(
-        actionButton("delete_timepoint","Delete timepoint",icon=icon("trash"),class="btn-danger"),
-        actionButton("delete_mutation","Delete mutation",icon=icon("trash"),class="btn-danger")
+      actionButton(
+        "edit_drug_effect",
+        "Edit drug impact",
+        icon = icon("flask"),
+        class = "btn-info"
       ),
       data.step = 8,
       data.intro = get_step(8)
+    ),
+    
+    introBox(
+      tagList(
+        actionButton("delete_timepoint","Delete timepoint",
+                     icon=icon("trash"), class="btn-danger"),
+        actionButton("delete_mutation","Delete mutation",
+                     icon=icon("trash"), class="btn-danger")
+      ),
+      data.step = 9,
+      data.intro = get_step(9)
     ),
     
     introBox(
@@ -111,50 +174,105 @@ ui <- dashboardPage(
         icon = icon("plus"),
         class = "btn-primary"
       ),
-      data.step = 9,
-      data.intro = get_step(9)
+      data.step = 10,
+      data.intro = get_step(10)
     ),
     
     br(), br(),
     
     sidebarMenu(
       id = "sidebar_menu",
-      menuItem("Visualization", tabName = "viz", icon = icon("chart-area")),
-      menuItem("Data format", tabName = "format", icon = icon("info-circle")),
-      menuItem("Metadata", tabName = "metadata", icon = icon("database"))
+      
+      menuItem(
+        "Visualization",
+        tabName = "viz",
+        icon = icon("chart-area")
+      ),
+      
+      menuItem(
+        "Data format",
+        tabName = "format",
+        icon = icon("info-circle")
+      ),
+      
+      menuItem(
+        "Metadata",
+        tabName = "metadata",
+        icon = icon("database"),
+        `data-step` = 15,
+        `data-intro` = get_step(15)
+      )
     )
+    
   ),
   
   dashboardBody(
+    
     useShinyjs(),
     introjsUI(),
-    introBox(
-      tags$div(id = "tour_start"),
-      data.step = 1,
-      data.intro = get_step(1)
-    ),
+    
     tags$head(
       tags$style(HTML("
-      .modal-lg {
-        width: 90% !important;
-        max-width: 1400px !important;
+      
+      .navbar-nav > .notifications-menu > .dropdown-menu > li > .menu > li > a {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        height: auto !important;
       }
+
+      .navbar-nav > .notifications-menu > .dropdown-menu > li > .menu > li {
+        height: auto !important;
+      }
+
+      .navbar-nav > .notifications-menu > .dropdown-menu {
+        max-height: 600px !important;
+        overflow-y: auto !important;
+      }
+
     "))
     ),
+    
     fluidRow(
-      introBox(
-        column(
-          12,
-          actionButton("show_fish", "FISHPLOT", class = "btn-success"),
-          actionButton("show_tree", "MUTATION TREE", class = "btn-success"),
-          actionButton("show_data", "DATA INFO", class = "btn-success"),
-          actionButton("show_matrix", "DATA MATRIX", class = "btn-success")
+      column(
+        width = 12,
+        
+        actionButton(
+          inputId = "show_fish",
+          label   = "FISHPLOT",
+          class   = "btn-success",
+          `data-step`  = 11,
+          `data-intro` = get_step(11)
         ),
-        data.step = 10,
-        data.intro = get_step(10)
+        
+        actionButton(
+          inputId = "show_tree",
+          label   = "MUTATION TREE",
+          class   = "btn-success",
+          `data-step`  = 12,
+          `data-intro` = get_step(12)
+        ),
+        
+        actionButton(
+          inputId = "show_data",
+          label   = "DATA INFO",
+          class   = "btn-success",
+          `data-step`  = 13,
+          `data-intro` = get_step(13)
+        ),
+        
+        actionButton(
+          inputId = "show_matrix",
+          label   = "DATA MATRIX",
+          class   = "btn-success",
+          `data-step`  = 14,
+          `data-intro` = get_step(14)
+        )
       )
     ),
+    
     br(),
+    
     uiOutput("main_view")
   )
 )

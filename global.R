@@ -63,7 +63,7 @@ generate_random_global_effect <- function() {
   runif(1, 0.2, 1.4)
 }
 
-# Intro steps from de csf file
+# Intro steps from de csv file
 intro_steps <- read_delim(
   "fishplot_tour.csv",
   delim = ";",
@@ -74,4 +74,20 @@ get_step <- function(n) {
   step_text <- intro_steps$text[intro_steps$step == n]
   if (length(step_text) == 0) return("")
   step_text[[1]]
+}
+
+normalize_timepoint_percentages <- function(df) {
+  
+  df %>%
+    group_by(sample_id) %>%
+    mutate(
+      total = sum(size_percent, na.rm = TRUE),
+      size_percent = ifelse(
+        total > 100,
+        size_percent / total * 100,
+        size_percent
+      )
+    ) %>%
+    ungroup() %>%
+    select(-total)
 }

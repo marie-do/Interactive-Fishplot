@@ -1,0 +1,9 @@
+step;text
+1;Load your JSON dataset containing patient IDs, mutation names, node_IDs, and clonal proportions. Click on Data format for more details.
+2;Select a patient and a timepoint to explore clonal evolution.
+3;Edit clonal proportions (the sum of children cannot exceed the parent size, and the total percentages cannot exceed 100%; otherwise, values will be normalized).
+4;Add mutations or timepoints. To add a mutation, choose the parent node_ID from which the new mutation will be derived.
+5;Modify the drug effect by entering a number between 0 and 2.
+6;Delete mutations or timepoints. Only the current timepoint can be deleted. A newly created mutation will be removed, while an existing mutation will be set to a near-zero value.
+7;Use the green visualization buttons to switch between the Fishplot, Mutation Tree, and Data Matrix views.
+8;You can save your modified dataset at any time.

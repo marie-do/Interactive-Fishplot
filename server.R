@@ -105,6 +105,7 @@ server <- function(input, output, session) {
     
   )
   
+  # Initialize available drugs (can be extended later with dynamic addition)
   rv$available_drugs <- c(
     "Midostaurin",
     "Venetoclax",
@@ -112,6 +113,7 @@ server <- function(input, output, session) {
     "Azacitidine"
   )
   
+  # Drug observer to update drug selection choices
   observe({
     updateSelectInput(
       session,
@@ -213,6 +215,38 @@ server <- function(input, output, session) {
     
     rv$clones_df <- bind_rows(rv$clones_df, base_rows)
     rv$objects <- build_all_objects(rv$clones_df)
+    rand_val <- generate_random_global_effect()
+    
+    #Initialize drug effects for new drug events, so that 
+    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
+    
+    if (!is.null(mat) && ncol(mat) >= 3) {
+      
+      drug_cols <- seq(2, ncol(mat), by = 2)
+      node_ids <- rownames(mat)
+      
+      for (drug in rv$available_drugs) {
+        
+        for (col in drug_cols) {
+          
+          key <- paste(input$patient, drug, col, sep = "_")
+          
+          if (is.null(rv$drug_effects[[key]])) {
+            
+            rand_val <- generate_random_global_effect()
+            
+            rv$drug_effects[[key]] <- list(
+              mode = "global",
+              global_value = default_val,
+              per_mutation = setNames(
+                rep(default_val, length(node_ids)),
+                node_ids
+              )
+            )
+          }
+        }
+      }
+    }
     
     updateSelectInput(
       session,
@@ -354,6 +388,8 @@ server <- function(input, output, session) {
       }
     }
     
+    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
+    
     rv$objects <- build_all_objects(rv$clones_df)
     removeModal()
   })
@@ -473,6 +509,7 @@ server <- function(input, output, session) {
       bind_rows()
     
     rv$clones_df <- bind_rows(rv$clones_df, all_new_rows)
+    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     rv$objects <- build_all_objects(rv$clones_df)
   })
   
@@ -499,15 +536,14 @@ server <- function(input, output, session) {
   })
   
   output$main_view <- renderUI({
+    print(paste("Current view:", rv$view))
     
     if (rv$view == "fish") {
-      introBox(
-        plotOutput("fishplot", height = "700px"),
-        data.step = 11,
-        data.intro = get_step(11)
-      )
+      
+      plotOutput("fishplot", height = "700px")
       
     } else if (rv$view == "tree") {
+      
       tagList(
         div(
           style = "margin-bottom:10px;",
@@ -517,45 +553,32 @@ server <- function(input, output, session) {
         ),
         div(
           style = "overflow:auto; border:1px solid #ddd;",
-          introBox(
-            grVizOutput("mutation_tree", height = "800px"),
-            data.step = 12,
-            data.intro = get_step(12)
-          )
+          grVizOutput("mutation_tree", height = "800px")
         )
       )
       
-      
     } else if (rv$view == "format") {
+      
       box(width = 12, includeMarkdown("data_format.md"))
       
-    }
-    
-    else if (rv$view == "metadata") {
+    } else if (rv$view == "metadata") {
+      
       tagList(
         h3(paste("Metadata – Patient", input$patient)),
-        introBox(
-          DTOutput("metadata_table"),
-          data.step = 15,
-          data.intro = get_step(15)
-        ),
-        
+        DTOutput("metadata_table"),
         br(),
-        
         div(
           style = "display:flex; gap:10px;",
           actionButton("add_metadata_field", "Add metadata field", class = "btn-primary"),
           actionButton("delete_metadata_field", "Delete metadata field", class = "btn-danger")
         )
       )
-    }
-    
-    else if (rv$view =="matrix") {
+      
+    } else if (rv$view == "matrix") {
+      
       tagList(
         h3(paste("Fishplot matrix - Patient", input$patient)),
-        
         br(),
-        
         p(strong("Matrix rules applied:")),
         tags$ul(
           tags$li("Drug effect applied"),
@@ -563,18 +586,14 @@ server <- function(input, output, session) {
           tags$li("Parent-child constraints enforced"),
           tags$li("Root constraint enforced")
         ),
-        
         br(),
-        
-        introBox(
-          DTOutput("matrix_table"),
-          data.step = 13,
-          data.intro = get_step(13)
-        )
+        DTOutput("matrix_table")
       )
-    }
-    else {
+      
+    } else {
+      
       DTOutput("table")
+      
     }
   })
   
@@ -642,7 +661,7 @@ server <- function(input, output, session) {
     
     req(rv$clones_df, rv$objects)
     
-    zoom <- rv$zoom_level   # ← IMPORTANT : crée la dépendance
+    zoom <- rv$zoom_level 
     
     plot_mutation_tree_shiny(
       input$patient,
@@ -660,17 +679,6 @@ server <- function(input, output, session) {
           svg.style.transformOrigin = '0 0';
           svg.style.transform = 'scale(' + zoom + ')';
         }
-
-        el.querySelectorAll('.node').forEach(function(node) {
-          node.onclick = function() {
-            Shiny.setInputValue(
-              'mutation_clicked',
-              node.querySelector('title').textContent,
-              {priority: 'event'}
-            );
-          };
-        });
-
       }
     ", zoom))
   })
@@ -745,7 +753,7 @@ server <- function(input, output, session) {
           list(
             patient_id = patient_id_val,
             samples = samples_list,
-            drug_effects = patient_drug_effects   # 🔹 AJOUT ICI
+            drug_effects = patient_drug_effects  
           )
         })
       
@@ -758,44 +766,6 @@ server <- function(input, output, session) {
       )
     }
   )
-  
-  observeEvent(input$mutation_clicked, {
-    showModal(
-      modalDialog(
-        title = paste("Set percentage for", input$mutation_clicked),
-        numericInput(
-          "edit_percent",
-          "Percentage",
-          value = 10,
-          min = 0,
-          max = 100,
-          step = 0.1
-        ),
-        footer = tagList(
-          modalButton("Cancel"),
-          actionButton("confirm_edit", "Apply", class = "btn-success")
-        )
-      )
-    )
-  })
-  
-  observeEvent(input$confirm_edit, {
-    
-    req(rv$clones_df)
-    removeModal()
-    
-    rv$clones_df <- rv$clones_df %>%
-      mutate(
-        size_percent = ifelse(
-          sample_id == input$selected_timepoint &
-            node_id == input$mutation_clicked,
-          input$edit_percent,
-          size_percent
-        )
-      )
-    
-    rv$objects <- build_all_objects(rv$clones_df)
-  })
   
   #Observer for deleting timepoint
   observeEvent(input$delete_timepoint, {
@@ -834,6 +804,7 @@ server <- function(input, output, session) {
     rv$clones_df <- rv$clones_df %>%
       filter(sample_id != tp_to_delete)
     
+    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     rv$objects <- build_all_objects(rv$clones_df)
     
     remaining_timepoints <- rv$clones_df %>%
@@ -1037,6 +1008,7 @@ server <- function(input, output, session) {
       )
     }
     
+    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     rv$objects <- build_all_objects(rv$clones_df)
     
     removeModal()
@@ -1082,7 +1054,7 @@ server <- function(input, output, session) {
       
     } else {
       
-      # --- MODE PER MUTATION ---
+
       node_info <- get_node_labels(input$patient, rv$clones_df)
       
       tagList(
@@ -1405,7 +1377,6 @@ server <- function(input, output, session) {
   
   observeEvent(input$delete_metadata_field, {
     
-    # Vérification de l'existence du metadata
     if (is.null(rv$metadata_df) || ncol(rv$metadata_df) <= 1) {
       showNotification(
         "No metadata fields available for deletion.",
@@ -1597,5 +1568,25 @@ server <- function(input, output, session) {
         disableInteraction = TRUE
       )
     )
+  })
+  observeEvent(input$help_button, {
+    showModal(
+      modalDialog(
+        title = "Help – Quick Summary",
+        easyClose = TRUE,
+        footer = modalButton("Close"),
+        
+        tags$ul(
+          tags$li(icon("upload"), " Load a structured JSON dataset."),
+          tags$li(icon("user"), " Select a patient and timepoint."),
+          tags$li(icon("edit"), " Edit clones or simulate drug effects."),
+          tags$li(icon("chart-area"), " Visualize clonal evolution."),
+          tags$li(icon("save"), " Save your dataset.")
+        )
+      )
+    )
+  })
+  observe({
+    print(paste("Sidebar value:", input$sidebar_menu))
   })
 }
