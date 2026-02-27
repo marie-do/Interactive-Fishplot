@@ -3,7 +3,8 @@
 help_steps <- read_delim(
   "help_tour.csv",
   delim = ";",
-  col_types = cols()
+  col_types = cols(.default = "c"),
+  trim_ws = TRUE
 )
 
 ui <- dashboardPage(
@@ -195,10 +196,13 @@ ui <- dashboardPage(
         icon = icon("info-circle")
       ),
       
-      menuItem(
-        "Metadata",
-        tabName = "metadata",
-        icon = icon("database"),
+      introBox(
+        actionButton(
+          "Metadata",
+          label = "Metadata",
+          icon = icon("database"),
+          class = "btn btn-secondary"
+        ),
         `data-step` = 15,
         `data-intro` = get_step(15)
       )
