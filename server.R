@@ -652,7 +652,7 @@ server <- function(input, output, session) {
       concat_by_patient_hierarchy = rv$objects$concat_by_patient_hierarchy,
       all_patient_hierarchies = rv$objects$all_patient_hierarchies,
       mutation_lookup = rv$objects$mutation_lookup,
-      clone_palette = global_clone_palette,
+      clone_palette = rv$objects$clone_palette,
       input = input,
       rv = rv,
       mini = FALSE
