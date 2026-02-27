@@ -50,9 +50,11 @@ server <- function(input, output, session) {
             for (i in seq_len(nrow(mat_final))) {
               
               node_id <- rownames(mat_final)[i]
-              mult <- effect$per_mutation[[node_id]]
-              if (is.null(mult)) mult <- 1
-              
+              if (!node_id %in% names(effect$per_mutation)) {
+                mult <- 1
+              } else {
+                mult <- effect$per_mutation[[node_id]]
+              }
               mat_final[i, col] <- mat_final[i, col - 1] * mult # -> per-mutation mode : each mutation has its own multiplier
             }
           }

@@ -1,4 +1,4 @@
-## 2.1 The Data
+## The Data
 
 The development of the customized fishplot function is based on the Morita et al. (2020) dataset.
 This dataset includes 153 acute myeloid leukemia (AML) point mutation trees from 123 patients,
