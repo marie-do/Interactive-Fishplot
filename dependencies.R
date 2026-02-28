@@ -13,7 +13,8 @@ required_packages <- c(
   "shinydashboard",
   "stringr",
   "DT",
-  "DiagrammeR"
+  "DiagrammeR",
+  "markdown"
 )
 
 # install missing packages
@@ -40,3 +41,4 @@ library(stringr)
 library(DT)
 library(DiagrammeR)
 library(dplyr)
+library(markdown)
