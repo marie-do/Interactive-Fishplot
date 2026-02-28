@@ -63,6 +63,22 @@ generate_random_global_effect <- function() {
   runif(1, 0.2, 1.4)
 }
 
+get_node_labels <- function(patient, clones_df) {
+  
+  clones_df %>%
+    filter(get_patient_id(sample_id) == patient) %>%
+    distinct(node_id, mutation) %>%
+    arrange(as.numeric(node_id)) %>%
+    mutate(
+      label = paste0(
+        "Node ", node_id,
+        "  |  ",
+        mutation
+      )
+    ) %>%
+    select(node_id, label)
+}
+
 # Intro steps from de csv file
 intro_steps <- read_delim(
   "fishplot_tour.csv",
