@@ -233,7 +233,12 @@ ui <- dashboardPage(
         max-height: 600px !important;
         overflow-y: auto !important;
       }
-
+      table.dataTable tbody td {
+        cursor: pointer;
+      }
+      table.dataTable tbody td:not(:first-child):hover {
+        background-color: #e8f4ff !important;
+      }
     "))
     ),
     

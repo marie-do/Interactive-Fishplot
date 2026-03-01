@@ -4,7 +4,16 @@ set.seed(123)
 
 # Core dependencies
 source("dependencies.R")
-source("fishplot_set_up.R")
+
+# If fishplot is installed, silence fishplot_set_up.R. If it's not, install fishplot manually.
+
+
+if (requireNamespace("fishplot", quietly = TRUE)) {
+  library(fishplot)
+} else {
+  source("fishplot_set_up.R")
+}
+
 source("fishplot_code.R")
 source("diagram_shiny.R")
 

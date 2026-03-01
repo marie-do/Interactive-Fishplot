@@ -98,13 +98,39 @@ server <- function(input, output, session) {
     unlist(lapply(roots, traverse))
   }
   
+  # Helper function to reindex node IDs after full deletion of a mutation, to ensure that node IDs remain consecutive and consistent.
+  # This is important for the fishplot construction and to avoid issues with missing node IDs.
+  reindex_nodes <- function(df) {
+    
+    unique_nodes <- df %>%
+      distinct(node_id) %>%
+      arrange(as.numeric(node_id)) %>%
+      pull(node_id)
+    
+    new_ids <- as.character(seq_along(unique_nodes))
+    id_map <- setNames(new_ids, unique_nodes)
+    
+    df <- df %>%
+      mutate(
+        node_id = id_map[node_id],
+        parent_id = case_when(
+          parent_id == "root" ~ "root",
+          parent_id %in% names(id_map) ~ id_map[parent_id],
+          TRUE ~ "root" 
+        )
+      )
+    
+    return(df)
+  }
+  
   rv <- reactiveValues(
     clones_df = NULL,
     metadata_df = NULL,
     objects = NULL,
     view = "fish",
     drug_effects = list(),
-    zoom_level = 1
+    zoom_level = 1,
+    event_labels = list()
   )
   
   # Initialize available drugs (can be extended later with dynamic addition)
@@ -543,12 +569,21 @@ server <- function(input, output, session) {
   
   # Global display area + parameters 
   output$main_view <- renderUI({
-    print(paste("Current view:", rv$view))
     
     if (rv$view == "fish") {
       
-      plotOutput("fishplot", height = "700px")
-      
+      tagList(
+        div(
+          style = "margin-bottom:10px;",
+          actionButton(
+            "rename_events",
+            "Rename events",
+            icon = icon("edit"),
+            class = "btn-primary"
+          )
+        ),
+        plotOutput("fishplot", height = "700px")
+      )
     } else if (rv$view == "tree") {
       
       tagList(
@@ -649,6 +684,12 @@ server <- function(input, output, session) {
     
     req(input$patient, rv$objects)
     
+    custom_labels <- NULL
+    
+    if (!is.null(rv$event_labels[[input$patient]])) {
+      custom_labels <- rv$event_labels[[input$patient]]
+    }
+    
     plot_fishplot(
       patient = input$patient,
       concat_by_patient_hierarchy = rv$objects$concat_by_patient_hierarchy,
@@ -657,7 +698,8 @@ server <- function(input, output, session) {
       clone_palette = rv$objects$clone_palette,
       input = input,
       rv = rv,
-      mini = FALSE
+      mini = FALSE,
+      event_labels = custom_labels
     )
     
   })
@@ -887,17 +929,17 @@ server <- function(input, output, session) {
     
     nodes_with_children <- df_structure$parent_id
     
-    active_nodes <- df_patient %>%
-      group_by(node_id) %>%
-      summarise(total = sum(size_percent, na.rm = TRUE)) %>%
-      filter(total > 0) %>%
+    # Only mutations that are active at the current timepoint and do not have children can be deleted, to ensure biological consistency of the tree structure.
+    current_active_nodes <- df_patient %>%
+      filter(sample_id == input$selected_timepoint,
+             size_percent > 0) %>%
       pull(node_id)
     
     deletable_clones <- df_structure %>%
       filter(
         parent_id != "root",
         !node_id %in% nodes_with_children,
-        node_id %in% active_nodes
+        node_id %in% current_active_nodes
       ) %>%
       arrange(as.numeric(node_id))
     
@@ -980,6 +1022,15 @@ server <- function(input, output, session) {
       
       rv$clones_df <- rv$clones_df %>%
         filter(node_id != node_to_delete)
+      
+      # Clean the drug effect associated
+      rv$drug_effects <- rv$drug_effects[
+        !grepl(paste0("_", node_to_delete, "$"),
+               names(rv$drug_effects))
+      ]
+      
+     # Reindexing nodes
+      rv$clones_df <- reindex_nodes(rv$clones_df)
       
       showNotification(
         paste(
@@ -1382,8 +1433,14 @@ server <- function(input, output, session) {
     
     removeModal()
     
-    showNotification("Metadata field added",
-                     type = "message")
+    showNotification(
+      paste0(
+        "Metadata field '", input$new_meta_name,
+        "' added.\nClick inside the empty cells of this new column to enter values."
+      ),
+      type = "message",
+      duration = 6
+    )
   })
   
   # Delete metadata field observer
@@ -1571,5 +1628,77 @@ server <- function(input, output, session) {
   })
   observeEvent(input$Metadata, {
     rv$view <- "metadata"
+  })
+  
+  observeEvent(input$rename_events, {
+    
+    req(input$patient, rv$objects)
+    
+    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
+    req(mat)
+    
+    current_labels <- colnames(mat)
+    
+    showModal(
+      modalDialog(
+        title = paste("Rename events – Patient", input$patient),
+        size = "l",
+        easyClose = FALSE,
+        
+        tagList(
+          lapply(seq_along(current_labels), function(i) {
+            
+            textInput(
+              inputId = paste0("event_label_", i),
+              label = paste("Event", current_labels[i]),
+              value = ifelse(
+                !is.null(rv$event_labels[[input$patient]]) &&
+                  length(rv$event_labels[[input$patient]]) >= i,
+                rv$event_labels[[input$patient]][i],
+                current_labels[i]
+              )
+            )
+          })
+        ),
+        
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton(
+            "confirm_event_rename",
+            "Apply",
+            class = "btn-success"
+          )
+        )
+      )
+    )
+  })
+  
+  observeEvent(input$confirm_event_rename, {
+    
+    req(input$patient, rv$objects)
+    
+    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
+    req(mat)
+    
+    new_labels <- sapply(seq_len(ncol(mat)), function(i) {
+      input[[paste0("event_label_", i)]]
+    })
+    
+    if (any(new_labels == "") || any(duplicated(new_labels))) {
+      showNotification(
+        "Event names must be unique and non-empty.",
+        type = "error"
+      )
+      return()
+    }
+    
+    rv$event_labels[[input$patient]] <- new_labels
+    
+    removeModal()
+    
+    showNotification(
+      "Event labels updated.",
+      type = "message"
+    )
   })
 }

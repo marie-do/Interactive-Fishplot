@@ -11,7 +11,8 @@ plot_fishplot <- function(
     clone_palette,
     input,
     rv,
-    mini = FALSE
+    mini = FALSE,
+    event_labels = NULL 
 ) {
   
   if (mini) {
@@ -120,11 +121,23 @@ plot_fishplot <- function(
     separate.independent.clones = FALSE
   )
   
+  if (!mini) {
+    
+    if (!is.null(event_labels) && length(event_labels) == length(timepoints)) {
+      vlab_final <- event_labels
+    } else {
+      vlab_final <- colnames(mat_final)  # fallback propre
+    }
+    
+  } else {
+    vlab_final <- NULL
+  }
+  
   fishPlot(
     fishObj,
     shape = "spline",
     vlines = if (mini) NULL else timepoints,
-    vlab = if (mini) NULL else paste0("t", timepoints),
+    vlab = vlab_final,
     title.btm = if (mini) "" else patient
   )
   

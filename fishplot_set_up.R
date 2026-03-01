@@ -1,6 +1,6 @@
 library(methods)
 
-fishplot_source <- "C:/fishplot_manual/fishplot-master"
+fishplot_source <- file.path("fishplot_manual", "fishplot-master")
 
 if(!dir.exists(fishplot_source)) {
   cat("Folder not found. Contents of C:/fishplot_manual/:\n")
