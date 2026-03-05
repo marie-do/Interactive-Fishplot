@@ -90,6 +90,25 @@ plot_fishplot <- function(
   fish_colors <- clone_palette[clone_ids]
   timepoints <- seq_len(ncol(mat_final))
   
+  # GENERATE CLEAN TIME + DRUG LABELS
+  
+  n_cols <- ncol(mat_final)
+  
+  x_labels <- character(n_cols)
+  real_tp_index <- 1
+  drug_index <- 1
+  
+  for (i in seq_len(n_cols)) {
+    
+    if (i %% 2 == 1) {
+      x_labels[i] <- paste0("t", real_tp_index)
+      real_tp_index <- real_tp_index + 1
+    } else {
+      x_labels[i] <- paste0("drug_event_", drug_index)
+      drug_index <- drug_index + 1
+    }
+  }
+  
   fishObj <- tryCatch({
     
     suppressWarnings(
@@ -126,7 +145,7 @@ plot_fishplot <- function(
     if (!is.null(event_labels) && length(event_labels) == length(timepoints)) {
       vlab_final <- event_labels
     } else {
-      vlab_final <- colnames(mat_final)  # fallback propre
+      vlab_final <- x_labels
     }
     
   } else {

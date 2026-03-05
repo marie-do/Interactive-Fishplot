@@ -2,42 +2,7 @@
 
 server <- function(input, output, session) {
   
-  #Reactive Matrix : Construction of the cummulative matrix with all the rules applied (drug effects, zero reappearance, parent-child constraints, root constraint)
-  safe_hierarchy_rebalance <- function(mat, parents) {
-    
-    for (col in seq_len(ncol(mat))) {
-      
-      root_index <- which(parents == 0)
-      mat[root_index, col] <- 100
-      
-      repeat {
-        
-        changed <- FALSE
-        
-        for (i in seq_along(parents)) {
-          
-          parent <- parents[i]
-          if (parent == 0) next
-          
-          children <- which(parents == parent)
-          children_sum <- sum(mat[children, col])
-          
-          if (children_sum > mat[parent, col] && children_sum > 0) {
-            
-            scale_factor <- mat[parent, col] / children_sum
-            mat[children, col] <- mat[children, col] * scale_factor
-            
-            changed <- TRUE
-          }
-        }
-        
-        if (!changed) break
-      }
-      
-    }
-    
-    mat
-  }
+  #Reactive Matrix
   
   fishplot_matrix_reactive <- reactive({
     
@@ -49,7 +14,7 @@ server <- function(input, output, session) {
     parents <- rv$objects$all_patient_hierarchies[[input$patient]]$parent_index
     mat_final <- mat
     
-    # Fix monotimepoints with single column by duplicating it (fishplot requires at least 2 timepoints)
+    # Fix monotime
     if (ncol(mat_final) == 1) {
       
       original_name <- colnames(mat_final)[1]
@@ -58,45 +23,37 @@ server <- function(input, output, session) {
       
       colnames(mat_final) <- c(
         original_name,
-        paste0(original_name, "_duplicated")
+        paste0(original_name, "_dup")
       )
     }
     
     # Apply drug effects
-    # Only apply drug effects if REAL multiple timepoints exist
-    real_timepoints <- rv$clones_df %>%
-      filter(get_patient_id(sample_id) == input$patient) %>%
-      pull(sample_id) %>%
-      unique()
-    
-    if (length(real_timepoints) >= 2) {
+    if (ncol(mat_final) >= 3) {
       
-      for (col in seq(2, ncol(mat_final) - 1, by = 2)) { #drug event columns every 2 columns, so that each timepoint are separated by a drug event.
+      for (col in seq(2, ncol(mat_final) - 1, by = 2)) {
+        
         key <- paste(input$patient,
                      input$selected_drug,
                      col,
                      sep = "_")
         
-        effect <- rv$drug_effects[[key]] # 2 modes : global or per-mutation. 
-        #The observeEvent for drug effect editing will update this reactive value with the new drug effect parameters, which will then be applied here to the matrix.
+        effect <- rv$drug_effects[[key]]
         
-        if (!is.null(effect)) { 
+        if (!is.null(effect)) {
           
           if (effect$mode == "global") {
             
-            mat_final[, col] <- mat_final[, col - 1] * effect$global_value # -> global mode : the same multiplier is applied to all mutations
+            mat_final[, col] <- mat_final[, col - 1] * effect$global_value
             
           } else {
             
             for (i in seq_len(nrow(mat_final))) {
               
               node_id <- rownames(mat_final)[i]
-              if (!node_id %in% names(effect$per_mutation)) {
-                mult <- 1
-              } else {
-                mult <- effect$per_mutation[[node_id]]
-              }
-              mat_final[i, col] <- mat_final[i, col - 1] * mult # -> per-mutation mode : each mutation has its own multiplier
+              mult <- effect$per_mutation[[node_id]]
+              if (is.null(mult)) mult <- 1
+              
+              mat_final[i, col] <- mat_final[i, col - 1] * mult
             }
           }
         }
@@ -104,76 +61,50 @@ server <- function(input, output, session) {
     }
     
     mat_final <- fix_zero_reappearance(mat_final)
-    mat_final <- safe_hierarchy_rebalance(mat_final, parents)
+    mat_final <- enforce_fishplot_constraints(mat_final, parents)
     
-    mat_final[mat_final < 0] <- 0
     mat_final[!is.finite(mat_final)] <- 0
+    mat_final[mat_final < 0] <- 0
     
     return(mat_final)
   })
   
-  # Helper function to get depth-first order of nodes based on parent-child relationships by recursively traversing the tree structure.
   get_depth_first_order <- function(node_ids, parent_index) {
     
-    children_map <- split(seq_along(parent_index), parent_index) # list where names are parent indices and values are vectors of child indices
+    children_map <- split(seq_along(parent_index), parent_index)
     
     traverse <- function(idx) {
       
-      current <- node_ids[idx] # start with the current node ID
-      child_idx <- children_map[[as.character(idx)]] # get child indices of the current node
+      current <- node_ids[idx]
+      child_idx <- children_map[[as.character(idx)]]
       
-      if (is.null(child_idx)) { # if no children, return current node ID -> leaf node
+      if (is.null(child_idx)) {
         return(current)
       }
       
       # depth-first order = biological order
       c(
         current,
-        unlist(lapply(child_idx, traverse)) # children are traversed recursively in the same way
+        unlist(lapply(child_idx, traverse))
       )
     }
     
     # roots = nodes without parent
     roots <- which(parent_index == 0)
+    
     unlist(lapply(roots, traverse))
   }
-  
-  # Helper function to reindex node IDs after full deletion of a mutation, to ensure that node IDs remain consecutive and consistent.
-  # This is important for the fishplot construction and to avoid issues with missing node IDs.
-  reindex_nodes <- function(df) {
-    
-    unique_nodes <- df %>%
-      distinct(node_id) %>%
-      arrange(as.numeric(node_id)) %>%
-      pull(node_id)
-    
-    new_ids <- as.character(seq_along(unique_nodes))
-    id_map <- setNames(new_ids, unique_nodes)
-    
-    df <- df %>%
-      mutate(
-        node_id = id_map[node_id],
-        parent_id = case_when(
-          parent_id == "root" ~ "root",
-          parent_id %in% names(id_map) ~ id_map[parent_id],
-          TRUE ~ "root" 
-        )
-      )
-    
-    return(df)
-  }
-  
   rv <- reactiveValues(
     clones_df = NULL,
     metadata_df = NULL,
     objects = NULL,
     view = "fish",
+    clicked_node = NULL,
     drug_effects = list(),
     zoom_level = 1,
-    event_labels = list()
+    
   )
   
-  # Initialize available drugs (can be extended later with dynamic addition)
   rv$available_drugs <- c(
     "Midostaurin",
     "Venetoclax",
@@ -181,17 +112,15 @@ server <- function(input, output, session) {
     "Azacitidine"
   )
   
-  # Drug observer to update drug selection choices
   observe({
-    if (!is.null(rv$available_drugs) && length(rv$available_drugs) > 0) {
-      updateSelectInput(
-        session,
-        "selected_drug",
-        choices = rv$available_drugs,
-        selected = rv$available_drugs[1]
-      )
-    }
+    updateSelectInput(
+      session,
+      "selected_drug",
+      choices = rv$available_drugs,
+      selected = rv$available_drugs[1]
+    )
   })
+  
   
   # load file server
   observeEvent(input$load_file, {
@@ -203,7 +132,6 @@ server <- function(input, output, session) {
       simplifyVector = FALSE
     )
     
-    # Clone extraction
     base_clones_df <- extract_all_samples(my_json) %>%
       mutate(
         node_id = as.character(node_id),
@@ -213,10 +141,8 @@ server <- function(input, output, session) {
         sample_id = as.character(sample_id)
       )
     
-    #Metadata extraction 
     base_metadata_df <- extract_metadata(my_json)
     
-    # Store in reactive values
     rv$metadata_df <- base_metadata_df
     rv$clones_df <- base_clones_df
     rv$objects <- build_all_objects(base_clones_df)
@@ -266,7 +192,7 @@ server <- function(input, output, session) {
   # Adding new timepoint
   observeEvent(input$new_timepoint, {
     
-    req(rv$clones_df) # Security : only allow adding timepoints if data is loaded
+    req(rv$clones_df)
     
     existing <- rv$clones_df %>%
       filter(get_patient_id(sample_id) == input$patient) %>%
@@ -275,7 +201,7 @@ server <- function(input, output, session) {
     
     nums <- as.numeric(str_extract(existing, "\\d+$"))
     nums <- nums[!is.na(nums)]
-    new_idx <- ifelse(length(nums) == 0, 1, max(nums) + 1) # Find the highest existing index and add 1, or start at 1 if none exist
+    new_idx <- ifelse(length(nums) == 0, 1, max(nums) + 1)
     new_sample <- paste0(input$patient, "-", sprintf("%03d", new_idx))
     
     base_rows <- rv$clones_df %>%
@@ -283,42 +209,10 @@ server <- function(input, output, session) {
       mutate(
         sample_id = new_sample,
         size_percent = 0
-      ) # Copied from the first existing timepoint of the patient, but with 0 percentages
+      )
     
     rv$clones_df <- bind_rows(rv$clones_df, base_rows)
     rv$objects <- build_all_objects(rv$clones_df)
-    rand_val <- generate_random_global_effect()
-    
-    #Initialize drug effects for new drug events, so that 
-    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
-    
-    if (!is.null(mat) && ncol(mat) >= 3) {
-      
-      drug_cols <- seq(2, ncol(mat), by = 2)
-      node_ids <- rownames(mat)
-      
-      for (drug in rv$available_drugs) {
-        
-        for (col in drug_cols) {
-          
-          key <- paste(input$patient, drug, col, sep = "_")
-          
-          if (is.null(rv$drug_effects[[key]])) {
-            
-            rand_val <- generate_random_global_effect()
-            
-            rv$drug_effects[[key]] <- list( #global mode + per mutation mode are ready to use. Initialized with random values, but can be updated if the user edits drug effects.
-              mode = "global",
-              global_value = rand_val,
-              per_mutation = setNames(
-                rep(rand_val, length(node_ids)),
-                node_ids
-              )
-            )
-          }
-        }
-      }
-    }
     
     updateSelectInput(
       session,
@@ -341,7 +235,6 @@ server <- function(input, output, session) {
     
     ordered_nodes <- get_depth_first_order(node_ids, parents)
     
-    # Build a dataframe with all nodes for the patient, their mutations, and their current percentages at the selected timepoint (or 0 if not present), ordered by the depth-first order of the tree structure.
     df_structure <- rv$clones_df %>%
       filter(get_patient_id(sample_id) == patient_id) %>%
       distinct(node_id, mutation) %>%
@@ -365,12 +258,69 @@ server <- function(input, output, session) {
     
     showModal(
       modalDialog(
-        title = paste("Edit all percentages –", input$selected_timepoint),
+        title = paste(
+          "Edit all percentages – Patient",
+          input$patient,
+          "| Timepoint:",
+          input$selected_timepoint
+        ),
         size = "l",
         easyClose = FALSE,
         fade = TRUE,
         
-        # top section with mutation tree
+        div(
+          style = "background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;",
+          
+          h4("Current editing context"),
+          
+          p(
+            strong("IMPORTANT :You are currently editing timepoint: "),
+            strong(input$selected_timepoint)
+          ),
+          
+          br(),
+          
+          p(
+            strong("To change timepoint:"),
+            br(),
+            "Use the timepoint selector in the left sidebar ",
+            "and select another timepoint before clicking 'Edit all percentages'."
+          ),
+          
+          hr(),
+          
+          h4("How to edit clone percentages"),
+          
+          tags$ol(
+            tags$li(
+              strong("Modify clone percentages in the numeric fields."),
+              " Values must be between 0 and 100."
+            ),
+            tags$li(
+              strong("Parent clones must be ≥ the sum of their children."),
+              " If not, automatic rebalancing will occur."
+            ),
+            tags$li(
+              strong("Click 'Apply changes' to validate.")
+            )
+          ),
+          
+          hr(),
+          
+          p(
+            strong("Important biological rules applied automatically:"),
+            br(),
+            "• Total clone size cannot exceed 100%.",
+            br(),
+            "• Parent-child hierarchy constraints are enforced.",
+            br(),
+            "• Zero reappearance correction is applied.",
+            br(),
+            "• Root clone is fixed at 100%."
+          )
+        ),
+        
+        # top section with tree
         h4("Mutation tree"),
         div(
           style = "
@@ -386,7 +336,7 @@ server <- function(input, output, session) {
         
         fluidRow(
           
-          # left column with numeric inputs for percentages (0-100)
+          # left column
           column(
             7,
             h4("Edit clone percentages"),
@@ -418,7 +368,7 @@ server <- function(input, output, session) {
             )
           ),
           
-          # Right column with mutation summary table
+          # Right column
           column(
             5,
             h4("Mutation summary"),
@@ -438,11 +388,11 @@ server <- function(input, output, session) {
     )
   })
   
-  # Confirm bulk edit observer
+  
   observeEvent(input$confirm_bulk_edit, {
     
     df_tp <- rv$clones_df %>%
-      filter(sample_id == input$selected_timepoint) # retrieve the clones of the current timepoint to get the list of nodes to update, and their current percentages (to fill in the numeric inputs)
+      filter(sample_id == input$selected_timepoint)
     
     for (node in df_tp$node_id) {
       
@@ -460,9 +410,6 @@ server <- function(input, output, session) {
           )
       }
     }
-    
-    # After editing the percentages, the normalization function is applied to ensure that the total percentage of all clones at the current timepoint does not exceed 100%.
-    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     
     rv$objects <- build_all_objects(rv$clones_df)
     removeModal()
@@ -485,6 +432,59 @@ server <- function(input, output, session) {
         title = paste("Add new mutation – Patient", input$patient),
         size = "l",
         
+        div(
+          style = "background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;",
+          
+          h4("Current editing context"),
+          
+          p(
+            strong("IMPORTANT : You are currently editing timepoint: "),
+            strong(input$selected_timepoint)
+          ),
+          
+          br(),
+          
+          p(
+            strong("To change timepoint:"),
+            br(),
+            "Use the timepoint selector in the left sidebar ",
+            "and choose another timepoint before clicking 'Create mutation'."
+          ),
+          
+          hr(),
+          
+          h4("How to create a new mutation"),
+          
+          tags$ol(
+            tags$li(
+              strong("Select a parent node: "),
+              "Choose the clone from which the new mutation evolves."
+            ),
+            tags$li(
+              strong("Enter the mutation name: "),
+              "Example: TP53 R175H."
+            ),
+            tags$li(
+              strong("Set the percentage for the current timepoint: "),
+              "This represents the clone size at ",
+              strong(input$selected_timepoint), "."
+            )
+          ),
+          
+          hr(),
+          
+          p(
+            strong("Important biological rule:"),
+            br(),
+            "• The mutation will appear at the current timepoint.",
+            br(),
+            "• It will be automatically set to 0% at all other timepoints.",
+            br(),
+            "• Parent-child hierarchy constraints will be enforced automatically."
+          )
+        ),
+        
+
         fluidRow(
           column(
             6,
@@ -534,13 +534,12 @@ server <- function(input, output, session) {
     )
   })
   
-  # Confirm add mutation observer
   observeEvent(input$confirm_add_mutation, {
     
     req(rv$clones_df)
     removeModal()
     
-    # new node ID generation (incremental based on the maximum existing node ID to ensure uniqueness)
+    # new node ID generation
     new_id <- max(as.numeric(rv$clones_df$node_id)) + 1
     new_id <- as.character(new_id)
     
@@ -560,7 +559,6 @@ server <- function(input, output, session) {
         size_percent = input$new_mutation_percent
       )
     
-    # Error handling
     if (input$new_parent == new_id) {
       showNotification("Parent cannot be itself", type = "error")
       return()
@@ -571,7 +569,6 @@ server <- function(input, output, session) {
       pull(sample_id) %>%
       unique()
     
-    # When a new mutation is added, at the selected timepoint it will have the user-defined percentage, but at all other timepoints it will start with 0%. 
     all_new_rows <- lapply(patient_samples, function(s) {
       new_row %>%
         mutate(
@@ -586,12 +583,11 @@ server <- function(input, output, session) {
       bind_rows()
     
     rv$clones_df <- bind_rows(rv$clones_df, all_new_rows)
-    # Normalization + objects rebuilding to ensure the new mutation is properly integrated. 
-    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     rv$objects <- build_all_objects(rv$clones_df)
   })
   
-  # when a button is clicked th UI is updated to display the corresponding view.
+  
+  
   observeEvent(input$show_fish, { rv$view <- "fish" })
   observeEvent(input$show_tree, { rv$view <- "tree" })
   observeEvent(input$show_data, { rv$view <- "data" })
@@ -605,27 +601,23 @@ server <- function(input, output, session) {
     if (input$sidebar_menu == "format") {
       rv$view <- "format"
     }
+    
+    if (input$sidebar_menu == "metadata") {
+      rv$view <- "metadata"
+    }
+    
   })
   
-  # Global display area + parameters 
   output$main_view <- renderUI({
     
     if (rv$view == "fish") {
-      
-      tagList(
-        div(
-          style = "margin-bottom:10px;",
-          actionButton(
-            "rename_events",
-            "Rename events",
-            icon = icon("edit"),
-            class = "btn-primary"
-          )
-        ),
-        plotOutput("fishplot", height = "700px")
+      introBox(
+        plotOutput("fishplot", height = "700px"),
+        data.step = 11,
+        data.intro = get_step(11)
       )
-    } else if (rv$view == "tree") {
       
+    } else if (rv$view == "tree") {
       tagList(
         div(
           style = "margin-bottom:10px;",
@@ -635,29 +627,45 @@ server <- function(input, output, session) {
         ),
         div(
           style = "overflow:auto; border:1px solid #ddd;",
-          grVizOutput("mutation_tree", height = "800px")
+          introBox(
+            grVizOutput("mutation_tree", height = "800px"),
+            data.step = 12,
+            data.intro = get_step(12)
+          )
         )
       )
+      
       
     } else if (rv$view == "format") {
       box(width = 12, includeMarkdown("data_format.md"))
       
-    } else if (rv$view == "metadata") {
+    }
+    
+    else if (rv$view == "metadata") {
       tagList(
         h3(paste("Metadata – Patient", input$patient)),
-        DTOutput("metadata_table"),
+        introBox(
+          DTOutput("metadata_table"),
+          data.step = 15,
+          data.intro = get_step(15)
+        ),
+        
         br(),
+        
         div(
           style = "display:flex; gap:10px;",
           actionButton("add_metadata_field", "Add metadata field", class = "btn-primary"),
           actionButton("delete_metadata_field", "Delete metadata field", class = "btn-danger")
         )
       )
-      
-    } else if (rv$view == "matrix") {
+    }
+    
+    else if (rv$view =="matrix") {
       tagList(
         h3(paste("Fishplot matrix - Patient", input$patient)),
+        
         br(),
+        
         p(strong("Matrix rules applied:")),
         tags$ul(
           tags$li("Drug effect applied"),
@@ -665,17 +673,21 @@ server <- function(input, output, session) {
           tags$li("Parent-child constraints enforced"),
           tags$li("Root constraint enforced")
         ),
+        
         br(),
-        DTOutput("matrix_table")
+        
+        introBox(
+          DTOutput("matrix_table"),
+          data.step = 13,
+          data.intro = get_step(13)
+        )
       )
-      
-    } else {
+    }
+    else {
       DTOutput("table")
-      
     }
   })
   
-  # Mini mutation tree displayed in the bulk edit modal to help better understand the tree structure while editing percentages.
   output$mini_tree <- renderGrViz({
     req(rv$clones_df, rv$objects)
     plot_mutation_tree_shiny(
@@ -685,7 +697,6 @@ server <- function(input, output, session) {
     )
   })
   
-  # Mini table displayed in the bulk edit modal to summarize the mutations and their current percentages at the selected timepoint.
   output$table <- renderDT({
     
     req(rv$clones_df, rv$objects, input$selected_timepoint)
@@ -696,7 +707,6 @@ server <- function(input, output, session) {
     parents <- rv$objects$all_patient_hierarchies[[patient_id]]$parent_index
     node_ids <- rownames(mat)
     
-    # Biological ordering
     ordered_nodes <- get_depth_first_order(node_ids, parents)
     
     df_display <- rv$clones_df %>%
@@ -719,42 +729,30 @@ server <- function(input, output, session) {
     datatable(df_display, rownames = FALSE)
   })
   
-  # Matrix table to display the reactive matrix with all rules applied, for better understanding of how the final fishplot is constructed.
+  
   output$fishplot <- renderPlot({
     
-    req(input$patient)
-    
-    mat_corrected <- fishplot_matrix_reactive()
-    req(mat_corrected)
-    
-    custom_labels <- NULL
-    
-    if (!is.null(rv$event_labels[[input$patient]])) {
-      custom_labels <- rv$event_labels[[input$patient]]
-    }
-    
-    corrected_list <- list()
-    corrected_list[[input$patient]] <- mat_corrected
+    req(input$patient, rv$objects)
     
     plot_fishplot(
       patient = input$patient,
-      concat_by_patient_hierarchy = corrected_list,
+      concat_by_patient_hierarchy = rv$objects$concat_by_patient_hierarchy,
       all_patient_hierarchies = rv$objects$all_patient_hierarchies,
       mutation_lookup = rv$objects$mutation_lookup,
-      clone_palette = rv$objects$clone_palette,
+      clone_palette = global_clone_palette,
       input = input,
       rv = rv,
-      mini = FALSE,
-      event_labels = custom_labels
+      mini = FALSE
     )
+    
   })
   
-  # Mutation tree with zoom functionality
+  
   output$mutation_tree <- renderGrViz({
     
     req(rv$clones_df, rv$objects)
     
-    zoom <- rv$zoom_level 
+    zoom <- rv$zoom_level   # ← IMPORTANT : crée la dépendance
     
     plot_mutation_tree_shiny(
       input$patient,
@@ -772,11 +770,22 @@ server <- function(input, output, session) {
           svg.style.transformOrigin = '0 0';
           svg.style.transform = 'scale(' + zoom + ')';
         }
+
+        el.querySelectorAll('.node').forEach(function(node) {
+          node.onclick = function() {
+            Shiny.setInputValue(
+              'mutation_clicked',
+              node.querySelector('title').textContent,
+              {priority: 'event'}
+            );
+          };
+        });
+
       }
     ", zoom))
   })
   
-  # Save file server
+  
   output$save_file <- downloadHandler(
     filename = function() {
       paste0("modified_fishplot_data_", Sys.Date(), ".json")
@@ -846,7 +855,7 @@ server <- function(input, output, session) {
           list(
             patient_id = patient_id_val,
             samples = samples_list,
-            drug_effects = patient_drug_effects  
+            drug_effects = patient_drug_effects   # 🔹 AJOUT ICI
           )
         })
       
@@ -859,6 +868,44 @@ server <- function(input, output, session) {
       )
     }
   )
+  
+  observeEvent(input$mutation_clicked, {
+    showModal(
+      modalDialog(
+        title = paste("Set percentage for", input$mutation_clicked),
+        numericInput(
+          "edit_percent",
+          "Percentage",
+          value = 10,
+          min = 0,
+          max = 100,
+          step = 0.1
+        ),
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton("confirm_edit", "Apply", class = "btn-success")
+        )
+      )
+    )
+  })
+  
+  observeEvent(input$confirm_edit, {
+    
+    req(rv$clones_df)
+    removeModal()
+    
+    rv$clones_df <- rv$clones_df %>%
+      mutate(
+        size_percent = ifelse(
+          sample_id == input$selected_timepoint &
+            node_id == input$mutation_clicked,
+          input$edit_percent,
+          size_percent
+        )
+      )
+    
+    rv$objects <- build_all_objects(rv$clones_df)
+  })
   
   #Observer for deleting timepoint
   observeEvent(input$delete_timepoint, {
@@ -897,7 +944,6 @@ server <- function(input, output, session) {
     rv$clones_df <- rv$clones_df %>%
       filter(sample_id != tp_to_delete)
     
-    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     rv$objects <- build_all_objects(rv$clones_df)
     
     remaining_timepoints <- rv$clones_df %>%
@@ -921,7 +967,7 @@ server <- function(input, output, session) {
     showNotification("Timepoint deleted", type = "warning")
   })
   
-  # Deletion helper text
+  
   output$deletion_preview <- renderText({
     
     req(input$mutation_to_delete, input$selected_timepoint)
@@ -974,17 +1020,17 @@ server <- function(input, output, session) {
     
     nodes_with_children <- df_structure$parent_id
     
-    # Only mutations that are active at the current timepoint and do not have children can be deleted, to ensure biological consistency of the tree structure.
-    current_active_nodes <- df_patient %>%
-      filter(sample_id == input$selected_timepoint,
-             size_percent > 0) %>%
+    active_nodes <- df_patient %>%
+      group_by(node_id) %>%
+      summarise(total = sum(size_percent, na.rm = TRUE)) %>%
+      filter(total > 0) %>%
       pull(node_id)
     
     deletable_clones <- df_structure %>%
       filter(
         parent_id != "root",
         !node_id %in% nodes_with_children,
-        node_id %in% current_active_nodes
+        node_id %in% active_nodes
       ) %>%
       arrange(as.numeric(node_id))
     
@@ -1000,6 +1046,20 @@ server <- function(input, output, session) {
       modalDialog(
         title = "Delete mutation",
         size = "l",
+        
+        p(
+          strong("IMPORTANT : You are currently editing timepoint: "),
+          strong(input$selected_timepoint)
+        ),
+        
+        br(),
+        
+        p(
+          strong("To change timepoint:"),
+          br(),
+          "Use the timepoint selector in the left sidebar ",
+          "and choose another sample before clicking 'Create mutation'."
+        ),
         
         h4("Deletion rules"),
         tags$ul(
@@ -1038,7 +1098,6 @@ server <- function(input, output, session) {
     )
   })
   
-  # Observer for confirming mutation deletion with different scenarios based on whether the mutation first appears at the current timepoint or existed before.
   observeEvent(input$confirm_delete_mutation, {
     
     req(rv$clones_df, input$mutation_to_delete, input$selected_timepoint)
@@ -1067,15 +1126,6 @@ server <- function(input, output, session) {
       
       rv$clones_df <- rv$clones_df %>%
         filter(node_id != node_to_delete)
-      
-      # Clean the drug effect associated
-      rv$drug_effects <- rv$drug_effects[
-        !grepl(paste0("_", node_to_delete, "$"),
-               names(rv$drug_effects))
-      ]
-      
-      # Reindexing nodes
-      rv$clones_df <- reindex_nodes(rv$clones_df)
       
       showNotification(
         paste(
@@ -1111,13 +1161,11 @@ server <- function(input, output, session) {
       )
     }
     
-    rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
     rv$objects <- build_all_objects(rv$clones_df)
     
     removeModal()
   })
   
-  # Dynamic UI for drug effect inputs, which updates based on the selected drug event and impact mode (global vs per-mutation).
   output$drug_numeric_inputs <- renderUI({
     
     req(rv$clones_df, input$patient, input$selected_drug_col, input$drug_mode)
@@ -1145,7 +1193,8 @@ server <- function(input, output, session) {
       rv$drug_effects[[key]] <- effect
     }
     
-    if (input$drug_mode == "global") { # If global mode is selected, display a single numeric input to control the overall drug impact on all mutations simultaneously.
+    if (input$drug_mode == "global") {
+      
       numericInput(
         "drug_global",
         "Global drug impact",
@@ -1157,7 +1206,7 @@ server <- function(input, output, session) {
       
     } else {
       
-      # If per-mutation mode is selected, display a numeric input for each mutation to allow specific control of drug impact on each clone. 
+      # --- MODE PER MUTATION ---
       node_info <- get_node_labels(input$patient, rv$clones_df)
       
       tagList(
@@ -1167,7 +1216,7 @@ server <- function(input, output, session) {
             match(id, node_info$node_id)
           ]
           
-          numericInput( # drug impact per mutation with values between 0 and 2 (0 = complete suppression, 1 = no effect, >1 = expansion), and a step of 0.05 for finer control
+          numericInput(
             inputId = paste0("drug_", id),
             label = current_label,
             value = effect$per_mutation[[id]],
@@ -1180,14 +1229,12 @@ server <- function(input, output, session) {
     }
   })
   
-  # Observer for editing drug effect
   observeEvent(input$edit_drug_effect, {
     
     req(rv$objects, rv$clones_df, input$patient, input$selected_drug)
     
     mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
     
-    # If a sample is a monotimepoint -> drug event cannot be created
     if (is.null(mat) || ncol(mat) < 3) {
       
       showModal(
@@ -1331,7 +1378,6 @@ server <- function(input, output, session) {
     
   })
   
-  # Observer for confirming drug effect edits, which updates the reactive values storing drug effects based on user input and the selected impact mode.
   observeEvent(input$confirm_drug_edit, {
     
     req(input$selected_drug_col)
@@ -1371,10 +1417,10 @@ server <- function(input, output, session) {
       }
     }
     
+    
     removeModal()
   })
   
-  # Minitable in the drug effect editing modal to summarize the mutations and their current percentages at the selected tiemepoint.
   output$mini_table <- renderDT({
     
     df_summary <- rv$clones_df %>%
@@ -1394,7 +1440,7 @@ server <- function(input, output, session) {
     )
   })
   
-  # Zoom Observers
+  
   observeEvent(input$zoom_in, {
     rv$zoom_level <- min(rv$zoom_level * 1.2, 5)
   })
@@ -1403,11 +1449,11 @@ server <- function(input, output, session) {
     rv$zoom_level <- max(rv$zoom_level / 1.2, 0.3)
   })
   
+  
   observeEvent(input$zoom_reset, {
     rv$zoom_level <- 1
   })
   
-  # Metadata table with dynamic editing capabilities, allowing users to modify metadata fields directly in the table, as well as add or delete metadata fields through modal dialogs.
   output$metadata_table <- renderDT({
     
     req(rv$metadata_df, input$patient)
@@ -1427,7 +1473,7 @@ server <- function(input, output, session) {
     
   })
   
-  # Observer for handling cell edits in the metadata table, which updates the reactive metadata dataframe based on user modifications.
+  
   observeEvent(input$metadata_table_cell_edit, {
     
     info <- input$metadata_table_cell_edit
@@ -1446,7 +1492,6 @@ server <- function(input, output, session) {
     ] <- info$value
   })
   
-  # Add metadata field observer
   observeEvent(input$add_metadata_field, {
     
     showModal(
@@ -1461,7 +1506,6 @@ server <- function(input, output, session) {
     )
   })
   
-  # Confirm add metadata field observer
   observeEvent(input$confirm_add_meta, {
     
     req(input$new_meta_name)
@@ -1478,18 +1522,31 @@ server <- function(input, output, session) {
     
     removeModal()
     
-    showNotification(
-      paste0(
-        "Metadata field '", input$new_meta_name,
-        "' added.\nClick inside the empty cells of this new column to enter values."
-      ),
-      type = "message",
-      duration = 6
-    )
+    showNotification("Metadata field added",
+                     type = "message")
   })
   
-  # Delete metadata field observer
+  
   observeEvent(input$delete_metadata_field, {
+    
+    # Vérification de l'existence du metadata
+    if (is.null(rv$metadata_df) || ncol(rv$metadata_df) <= 1) {
+      showNotification(
+        "No metadata fields available for deletion.",
+        type = "warning"
+      )
+      return()
+    }
+    
+    selectable_fields <- setdiff(colnames(rv$metadata_df), "sample_id")
+    
+    if (length(selectable_fields) == 0) {
+      showNotification(
+        "No removable metadata fields found.",
+        type = "warning"
+      )
+      return()
+    }
     
     showModal(
       modalDialog(
@@ -1497,19 +1554,21 @@ server <- function(input, output, session) {
         selectInput(
           "meta_field_to_delete",
           "Select field",
-          choices = setdiff(colnames(rv$metadata_df), "sample_id")
+          choices = selectable_fields
         ),
         footer = tagList(
           modalButton("Cancel"),
-          actionButton("confirm_delete_meta",
-                       "Delete",
-                       class = "btn-danger")
-        )
+          actionButton(
+            "confirm_delete_meta",
+            "Delete",
+            class = "btn-danger"
+          )
+        ),
+        easyClose = TRUE
       )
     )
   })
   
-  # Confirm delete metadata field observer
   observeEvent(input$confirm_delete_meta, {
     
     req(input$meta_field_to_delete)
@@ -1520,8 +1579,6 @@ server <- function(input, output, session) {
     showNotification("Metadata field deleted",
                      type = "warning")
   })
-  
-  # Add drug observer to allow users to add new drugs to the dataset, which can then be selected for editing drug effects in the fishplot matrix.
   observeEvent(input$add_drug, {
     
     showModal(
@@ -1536,7 +1593,6 @@ server <- function(input, output, session) {
     )
   })
   
-  # Confirm add drug observer
   observeEvent(input$confirm_add_drug, {
     
     req(input$new_drug_name)
@@ -1548,8 +1604,6 @@ server <- function(input, output, session) {
     removeModal()
   })
   
-  # Drug mode observer to update the drug effect reactive values when the user switches between global and per-mutation impact modes in the drug effect editing modal. 
-  # This ensures that the correct input values are displayed and stored based on the selected mode.
   observeEvent(input$drug_mode, {
     
     req(input$selected_drug_col)
@@ -1606,8 +1660,6 @@ server <- function(input, output, session) {
       }
     }
   )
-  
-  # Cummulative matrix observer
   observeEvent(input$show_matrix, {
     rv$view <- "matrix"
   })
@@ -1618,6 +1670,26 @@ server <- function(input, output, session) {
     req(mat)
     
     df <- as.data.frame(mat)
+    
+    n_cols <- ncol(df)
+    
+    new_names <- character(n_cols)
+    real_tp_index <- 1
+    drug_index <- 1
+    
+    for (i in seq_len(n_cols)) {
+      
+      if (i %% 2 == 1) {
+        new_names[i] <- paste0("t", real_tp_index)
+        real_tp_index <- real_tp_index + 1
+      } else {
+        new_names[i] <- paste0("drug_event_", drug_index)
+        drug_index <- drug_index + 1
+      }
+    }
+    
+    colnames(df) <- new_names
+    
     df <- tibble::rownames_to_column(df, "Clone")
     df[, -1] <- round(df[, -1], 4)
     
@@ -1653,7 +1725,6 @@ server <- function(input, output, session) {
     
   }, once = TRUE)
   
-  #Intro tour observer 
   observeEvent(input$start_intro_tour, {
     
     removeModal()
@@ -1669,81 +1740,6 @@ server <- function(input, output, session) {
         scrollToElement = TRUE,
         disableInteraction = TRUE
       )
-    )
-  })
-  observeEvent(input$Metadata, {
-    rv$view <- "metadata"
-  })
-  
-  observeEvent(input$rename_events, {
-    
-    req(input$patient, rv$objects)
-    
-    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
-    req(mat)
-    
-    current_labels <- colnames(mat)
-    
-    showModal(
-      modalDialog(
-        title = paste("Rename events – Patient", input$patient),
-        size = "l",
-        easyClose = FALSE,
-        
-        tagList(
-          lapply(seq_along(current_labels), function(i) {
-            
-            textInput(
-              inputId = paste0("event_label_", i),
-              label = paste("Event", current_labels[i]),
-              value = ifelse(
-                !is.null(rv$event_labels[[input$patient]]) &&
-                  length(rv$event_labels[[input$patient]]) >= i,
-                rv$event_labels[[input$patient]][i],
-                current_labels[i]
-              )
-            )
-          })
-        ),
-        
-        footer = tagList(
-          modalButton("Cancel"),
-          actionButton(
-            "confirm_event_rename",
-            "Apply",
-            class = "btn-success"
-          )
-        )
-      )
-    )
-  })
-  
-  observeEvent(input$confirm_event_rename, {
-    
-    req(input$patient, rv$objects)
-    
-    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
-    req(mat)
-    
-    new_labels <- sapply(seq_len(ncol(mat)), function(i) {
-      input[[paste0("event_label_", i)]]
-    })
-    
-    if (any(new_labels == "") || any(duplicated(new_labels))) {
-      showNotification(
-        "Event names must be unique and non-empty.",
-        type = "error"
-      )
-      return()
-    }
-    
-    rv$event_labels[[input$patient]] <- new_labels
-    
-    removeModal()
-    
-    showNotification(
-      "Event labels updated.",
-      type = "message"
     )
   })
 }
