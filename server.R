@@ -540,7 +540,20 @@ server <- function(input, output, session) {
     removeModal()
     
     # new node ID generation
-    new_id <- max(as.numeric(rv$clones_df$node_id)) + 1
+    # IDs existants uniquement pour le patient courant
+    existing_ids <- rv$clones_df %>%
+      filter(get_patient_id(sample_id) == input$patient) %>%
+      pull(node_id) %>%
+      unique() %>%
+      as.numeric()
+    
+    # Sécurité si vide
+    if (length(existing_ids) == 0) {
+      new_id <- 0
+    } else {
+      new_id <- max(existing_ids) + 1
+    }
+    
     new_id <- as.character(new_id)
     
     # New row creation
