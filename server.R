@@ -615,10 +615,6 @@ server <- function(input, output, session) {
       rv$view <- "format"
     }
     
-    if (input$sidebar_menu == "metadata") {
-      rv$view <- "metadata"
-    }
-    
   })
   
   output$main_view <- renderUI({
@@ -1122,8 +1118,7 @@ server <- function(input, output, session) {
     patient_timepoints <- rv$clones_df %>%
       filter(get_patient_id(sample_id) == patient) %>%
       pull(sample_id) %>%
-      unique() %>%
-      sort()
+      unique()
     
     first_appearance <- rv$clones_df %>%
       filter(
@@ -1140,14 +1135,6 @@ server <- function(input, output, session) {
       rv$clones_df <- rv$clones_df %>%
         filter(node_id != node_to_delete)
       
-      showNotification(
-        paste(
-          "Mutation completely deleted."
-        ),
-        type = "message",
-        duration = 6
-      )
-      
     } else {
       
       later_timepoints <- patient_timepoints[
@@ -1163,18 +1150,33 @@ server <- function(input, output, session) {
             size_percent
           )
         )
-      
-      showNotification(
-        paste(
-          "Mutation biologically suppressed.",
-          "It has been reduced to near-zero from this timepoint onward."
-        ),
-        type = "warning",
-        duration = 8
-      )
     }
     
-    rv$objects <- build_all_objects(rv$clones_df)
+    df_patient_after <- rv$clones_df %>%
+      filter(get_patient_id(sample_id) == patient)
+    
+    if (nrow(df_patient_after) == 0) {
+      
+      showNotification(
+        "Deletion cancelled: patient would become empty.",
+        type = "error"
+      )
+      
+      removeModal()
+      return()
+    }
+    
+    tryCatch({
+      rv$objects <- build_all_objects(rv$clones_df)
+    }, error = function(e) {
+      
+      showNotification(
+        paste("Internal hierarchy error:", e$message),
+        type = "error",
+        duration = 8
+      )
+      
+    })
     
     removeModal()
   })
@@ -1754,5 +1756,8 @@ server <- function(input, output, session) {
         disableInteraction = TRUE
       )
     )
+  })
+  observeEvent(input$Metadata, {
+    rv$view <- "metadata"
   })
 }
