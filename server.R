@@ -3,6 +3,41 @@
 server <- function(input, output, session) {
   
   #Reactive Matrix : Construction of the cummulative matrix with all the rules applied (drug effects, zero reappearance, parent-child constraints, root constraint)
+  safe_hierarchy_rebalance <- function(mat, parents) {
+    
+    for (col in seq_len(ncol(mat))) {
+      
+      root_index <- which(parents == 0)
+      mat[root_index, col] <- 100
+      
+      repeat {
+        
+        changed <- FALSE
+        
+        for (i in seq_along(parents)) {
+          
+          parent <- parents[i]
+          if (parent == 0) next
+          
+          children <- which(parents == parent)
+          children_sum <- sum(mat[children, col])
+          
+          if (children_sum > mat[parent, col] && children_sum > 0) {
+            
+            scale_factor <- mat[parent, col] / children_sum
+            mat[children, col] <- mat[children, col] * scale_factor
+            
+            changed <- TRUE
+          }
+        }
+        
+        if (!changed) break
+      }
+      
+    }
+    
+    mat
+  }
   
   fishplot_matrix_reactive <- reactive({
     
@@ -28,7 +63,13 @@ server <- function(input, output, session) {
     }
     
     # Apply drug effects
-    if (ncol(mat_final) >= 3) {
+    # Only apply drug effects if REAL multiple timepoints exist
+    real_timepoints <- rv$clones_df %>%
+      filter(get_patient_id(sample_id) == input$patient) %>%
+      pull(sample_id) %>%
+      unique()
+    
+    if (length(real_timepoints) >= 2) {
       
       for (col in seq(2, ncol(mat_final) - 1, by = 2)) { #drug event columns every 2 columns, so that each timepoint are separated by a drug event.
         key <- paste(input$patient,
@@ -62,12 +103,11 @@ server <- function(input, output, session) {
       }
     }
     
-    # Constraints application + corrections
     mat_final <- fix_zero_reappearance(mat_final)
-    mat_final <- enforce_fishplot_constraints(mat_final, parents)
+    mat_final <- safe_hierarchy_rebalance(mat_final, parents)
     
-    mat_final[!is.finite(mat_final)] <- 0
     mat_final[mat_final < 0] <- 0
+    mat_final[!is.finite(mat_final)] <- 0
     
     return(mat_final)
   })
@@ -682,7 +722,10 @@ server <- function(input, output, session) {
   # Matrix table to display the reactive matrix with all rules applied, for better understanding of how the final fishplot is constructed.
   output$fishplot <- renderPlot({
     
-    req(input$patient, rv$objects)
+    req(input$patient)
+    
+    mat_corrected <- fishplot_matrix_reactive()
+    req(mat_corrected)
     
     custom_labels <- NULL
     
@@ -690,9 +733,12 @@ server <- function(input, output, session) {
       custom_labels <- rv$event_labels[[input$patient]]
     }
     
+    corrected_list <- list()
+    corrected_list[[input$patient]] <- mat_corrected
+    
     plot_fishplot(
       patient = input$patient,
-      concat_by_patient_hierarchy = rv$objects$concat_by_patient_hierarchy,
+      concat_by_patient_hierarchy = corrected_list,
       all_patient_hierarchies = rv$objects$all_patient_hierarchies,
       mutation_lookup = rv$objects$mutation_lookup,
       clone_palette = rv$objects$clone_palette,
@@ -701,7 +747,6 @@ server <- function(input, output, session) {
       mini = FALSE,
       event_labels = custom_labels
     )
-    
   })
   
   # Mutation tree with zoom functionality
@@ -1029,7 +1074,7 @@ server <- function(input, output, session) {
                names(rv$drug_effects))
       ]
       
-     # Reindexing nodes
+      # Reindexing nodes
       rv$clones_df <- reindex_nodes(rv$clones_df)
       
       showNotification(
