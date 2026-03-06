@@ -47,7 +47,7 @@ if (fishplot_available) {
   library(fishplot)
   message("fishplot loaded successfully.")
 } else {
-  message("fishplot not available. Continuing without it.")
+  message("fishplot not available. It will be installed manually latter.")
 }
 
 required_packages <- c(
@@ -64,7 +64,8 @@ required_packages <- c(
   "stringr",
   "DT",
   "DiagrammeR",
-  "markdown"
+  "markdown",
+  "methods"
 )
 
 # install missing packages
@@ -92,3 +93,4 @@ library(DT)
 library(DiagrammeR)
 library(dplyr)
 library(markdown)
+library(methods)

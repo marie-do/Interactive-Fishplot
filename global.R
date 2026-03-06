@@ -3,7 +3,7 @@
 set.seed(123)
 
 # Core dependencies
-source("dependencies.R")
+source(file.path("..","dependencies.R"))
 
 # If fishplot is installed, silence fishplot_set_up.R. If it's not, install fishplot manually.
 
@@ -11,11 +11,11 @@ source("dependencies.R")
 if (requireNamespace("fishplot", quietly = TRUE)) {
   library(fishplot)
 } else {
-  source("fishplot_set_up.R")
+  source(file.path("..", "fishplot_manual_setup", "fishplot_set_up.R"))
 }
 
-source("fishplot_code.R")
-source("diagram_shiny.R")
+source(file.path("..","Fishplot_code","fishplot_code.R"))
+source(file.path("..","Mutation_Tree_Code","mutation_tree_code.R"))
 
 
 #Main function to build all objects needed for the app
@@ -88,9 +88,8 @@ get_node_labels <- function(patient, clones_df) {
     select(node_id, label)
 }
 
-# Intro steps from de csv file
 intro_steps <- read_delim(
-  "fishplot_tour.csv",
+  file.path("..", "Texts_and_Extras", "fishplot_tour.csv"),
   delim = ";",
   col_types = cols()
 )
