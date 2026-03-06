@@ -62,8 +62,8 @@ build_patient_hierarchy <- function(patient_samples, clones_df) {
   
   for (s in patient_samples) {
     df_s <- clones_df %>% filter(sample_id == s)
-    nodes_s <- df_s$node_id
-    parents_s <- df_s$parent_id
+    nodes_s <- as.character(df_s$node_id)
+    parents_s <- as.character(df_s$parent_id)
     
     new_nodes <- nodes_s[!nodes_s %in% cumulative_nodes]
     cumulative_nodes <- c(cumulative_nodes, new_nodes)
@@ -78,13 +78,26 @@ build_patient_hierarchy <- function(patient_samples, clones_df) {
   cn <- as.character(cumulative_nodes)
   
   parent_indices <- sapply(cn, function(nd) {
+    
     p <- parent_map[[nd]]
-    if (is.null(p) || p == "root") return(0)
-    match(p, cumulative_nodes) - 1
+    
+    if (is.null(p) || p == "root") {
+      return(0)
+    }
+    
+    idx <- match(p, cumulative_nodes)
+    
+    if (is.na(idx)) {
+      return(0)
+    }
+    
+    idx - 1
   })
   
-  root_id <- cn[parent_indices == 0][1]
-  keep <- cn != root_id
+  # remove artificial root node (the one whose mutation == "root")
+  root_nodes <- names(parent_map)[unlist(parent_map) == "root"]
+  
+  keep <- !(cn %in% root_nodes)
   
   list(
     final_nodes = cumulative_nodes[keep],
@@ -103,7 +116,7 @@ concat_patient_timepoints_hierarchy <- function(
   hier <- all_patient_hierarchies[[patient]]
   if (is.null(hier)) return(NULL)
   
-  final_rows <- hier$final_nodes
+  final_rows <- as.character(hier$final_nodes)
   patient_samples <- multitime_by_patient[[patient]]
   patient_samples <- patient_samples[order(get_suffix_num(patient_samples))]
   
@@ -112,8 +125,18 @@ concat_patient_timepoints_hierarchy <- function(
   if (length(patient_samples) == 1) {
     
     s <- patient_samples[1]
+    if (is.null(mat)) {
+      message("Matrix NULL for sample: ", s)
+    }
+    
+    if (!is.null(mat) && ncol(mat) == 0) {
+      message("Matrix with 0 columns for sample: ", s)
+    }
     mat <- all_matrices[[s]]
-    if (is.null(mat)) return(NULL)
+    
+    if (is.null(mat) || ncol(mat) == 0 || nrow(mat) == 0) {
+      return(NULL)
+    }
     
     last <- mat[, ncol(mat), drop = FALSE]
     
@@ -136,8 +159,19 @@ concat_patient_timepoints_hierarchy <- function(
   
   lastcols <- lapply(patient_samples, function(s) {
     
+    if (is.null(mat)) {
+      message("Matrix NULL for sample: ", s)
+    }
+    
+    if (!is.null(mat) && ncol(mat) == 0) {
+      message("Matrix with 0 columns for sample: ", s)
+    }
+    
     mat <- all_matrices[[s]]
-    if (is.null(mat)) return(NULL)
+    
+    if (is.null(mat) || ncol(mat) == 0 || nrow(mat) == 0) {
+      return(NULL)
+    }
     
     last <- mat[, ncol(mat), drop = FALSE]
     

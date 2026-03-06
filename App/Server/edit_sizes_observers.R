@@ -35,12 +35,69 @@ observeEvent(input$edit_all, {
   
   showModal(
     modalDialog(
-      title = paste("Edit all percentages –", input$selected_timepoint),
+      title = paste(
+        "Edit all percentages – Patient",
+        input$patient,
+        "| Timepoint:",
+        input$selected_timepoint
+      ),
       size = "l",
       easyClose = FALSE,
       fade = TRUE,
       
-      # top section with mutation tree
+      div(
+        style = "background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;",
+        
+        h4("Current editing context"),
+        
+        p(
+          strong("IMPORTANT :You are currently editing timepoint: "),
+          strong(input$selected_timepoint)
+        ),
+        
+        br(),
+        
+        p(
+          strong("To change timepoint:"),
+          br(),
+          "Use the timepoint selector in the left sidebar ",
+          "and select another timepoint before clicking 'Edit all percentages'."
+        ),
+        
+        hr(),
+        
+        h4("How to edit clone percentages"),
+        
+        tags$ol(
+          tags$li(
+            strong("Modify clone percentages in the numeric fields."),
+            " Values must be between 0 and 100."
+          ),
+          tags$li(
+            strong("Parent clones must be ≥ the sum of their children."),
+            " If not, automatic rebalancing will occur."
+          ),
+          tags$li(
+            strong("Click 'Apply changes' to validate.")
+          )
+        ),
+        
+        hr(),
+        
+        p(
+          strong("Important biological rules applied automatically:"),
+          br(),
+          "• Total clone size cannot exceed 100%.",
+          br(),
+          "• Parent-child hierarchy constraints are enforced.",
+          br(),
+          "• Zero reappearance correction is applied.",
+          br(),
+          "• Root clone is fixed at 100%."
+        )
+      ),
+      
+      # top section with tree
       h4("Mutation tree"),
       div(
         style = "
@@ -56,7 +113,7 @@ observeEvent(input$edit_all, {
       
       fluidRow(
         
-        # left column with numeric inputs for percentages (0-100)
+        # left column
         column(
           7,
           h4("Edit clone percentages"),
@@ -88,7 +145,7 @@ observeEvent(input$edit_all, {
           )
         ),
         
-        # Right column with mutation summary table
+        # Right column
         column(
           5,
           h4("Mutation summary"),

@@ -19,291 +19,345 @@ observe({
   }
 })
 
-# Deletion helper text
-output$deletion_preview <- renderText({
+# Dynamic UI for drug effect inputs, which updates based on the selected drug event and impact mode (global vs per-mutation).
+output$drug_numeric_inputs <- renderUI({
   
-  req(input$mutation_to_delete, input$selected_timepoint)
+  req(rv$clones_df, input$patient, input$selected_drug_col, input$drug_mode)
   
-  node <- input$mutation_to_delete
-  patient <- input$patient
-  current_tp <- input$selected_timepoint
+  mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
+  node_ids <- rownames(mat)
   
-  first_appearance <- rv$clones_df %>%
-    filter(
-      node_id == node,
-      get_patient_id(sample_id) == patient,
-      size_percent > 0
-    ) %>%
-    pull(sample_id) %>%
-    sort() %>%
-    .[1]
+  key <- paste(
+    input$patient,
+    input$selected_drug,
+    input$selected_drug_col,
+    sep = "_"
+  )
   
-  if (!is.na(first_appearance) && first_appearance == current_tp) {
+  effect <- rv$drug_effects[[key]]
+  
+  if (is.null(effect)) {
     
-    paste(
-      "This mutation first appears at the current timepoint.",
-      "\n→ It will be completely removed from the dataset.",
-      "\n→ It will disappear from all timepoints.",
-      "\n→ The evolutionary structure will be updated."
+    effect <- list(
+      mode = "global",
+      global_value = 1,
+      per_mutation = setNames(rep(1, length(node_ids)), node_ids)
+    )
+    
+    rv$drug_effects[[key]] <- effect
+  }
+  
+  if (input$drug_mode == "global") { # If global mode is selected, display a single numeric input to control the overall drug impact on all mutations simultaneously.
+    numericInput(
+      "drug_global",
+      "Global drug impact",
+      value = effect$global_value,
+      min = 0,
+      max = 2,
+      step = 0.05
     )
     
   } else {
     
-    paste(
-      "This mutation existed before the current timepoint.",
-      "\n→ It cannot biologically disappear.",
-      "\n→ It will be reduced to near-zero from this timepoint onward.",
-      "\n→ Previous timepoints will remain unchanged."
+    # If per-mutation mode is selected, display a numeric input for each mutation to allow specific control of drug impact on each clone. 
+    node_info <- get_node_labels(input$patient, rv$clones_df)
+    
+    tagList(
+      lapply(node_ids, function(id) {
+        
+        current_label <- node_info$label[
+          match(id, node_info$node_id)
+        ]
+        
+        numericInput( # drug impact per mutation with values between 0 and 2 (0 = complete suppression, 1 = no effect, >1 = expansion), and a step of 0.05 for finer control
+          inputId = paste0("drug_", id),
+          label = current_label,
+          value = effect$per_mutation[[id]],
+          min = 0,
+          max = 2,
+          step = 0.05
+        )
+      })
     )
   }
 })
 
-#Observer for mutation deletion
-observeEvent(input$delete_mutation, {
+# Observer for editing drug effect
+observeEvent(input$edit_drug_effect, {
   
-  req(rv$clones_df, input$patient)
+  req(rv$objects, rv$clones_df, input$patient, input$selected_drug)
   
-  df_patient <- rv$clones_df %>%
-    filter(get_patient_id(sample_id) == input$patient)
+  mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
   
-  df_structure <- df_patient %>%
-    distinct(node_id, mutation, parent_id)
-  
-  nodes_with_children <- df_structure$parent_id
-  
-  # Only mutations that are active at the current timepoint and do not have children can be deleted, to ensure biological consistency of the tree structure.
-  current_active_nodes <- df_patient %>%
-    filter(sample_id == input$selected_timepoint,
-           size_percent > 0) %>%
-    pull(node_id)
-  
-  deletable_clones <- df_structure %>%
-    filter(
-      parent_id != "root",
-      !node_id %in% nodes_with_children,
-      node_id %in% current_active_nodes
-    ) %>%
-    arrange(as.numeric(node_id))
-  
-  if (nrow(deletable_clones) == 0) {
-    showNotification(
-      "No deletable mutations available.\nOnly active leaf mutations (without children) can be removed.",
-      type = "warning"
+  # If a sample is a monotimepoint -> drug event cannot be created
+  if (is.null(mat) || ncol(mat) < 3) {
+    
+    showModal(
+      modalDialog(
+        title = "Drug editing not available",
+        icon = icon("exclamation-triangle", class = "text-warning"),
+        
+        p("This patient has only one real timepoint."),
+        br(),
+        p("Drug impact can only be edited when at least two real timepoints exist."),
+        
+        tags$ul(
+          tags$li("Drug events are inserted between real timepoints."),
+          tags$li("With only one timepoint, no drug event can be created.")
+        ),
+        
+        br(),
+        strong("To enable drug editing:"),
+        tags$ol(
+          tags$li("Click 'Create new timepoint'."),
+          tags$li("Then return to 'Edit drug impact'.")
+        ),
+        
+        footer = modalButton("OK"),
+        easyClose = TRUE
+      )
     )
+    
     return()
+  }
+  
+  drug_cols <- seq(2, ncol(mat), by = 2)
+  
+  if (length(drug_cols) == 0) {
+    showNotification("No drug events detected.", type = "warning")
+    return()
+  }
+  
+  drug_labels <- paste("Drug event", seq_along(drug_cols))
+  
+  selected_col <- drug_cols[1]
+  
+  node_ids <- rownames(mat)
+  node_info <- get_node_labels(input$patient, rv$clones_df)
+  
+  key <- paste(
+    input$patient,
+    input$selected_drug,
+    selected_col,
+    sep = "_"
+  )
+  
+  if (is.null(rv$drug_effects[[key]])) {
+    
+    rv$drug_effects[[key]] <- list(
+      mode = "global",
+      global_value = 1,
+      per_mutation = setNames(rep(1, length(node_ids)), node_ids)
+    )
+    
   }
   
   showModal(
     modalDialog(
-      title = "Delete mutation",
+      title = paste("Drug impact –", input$selected_drug),
       size = "l",
-      
-      h4("Deletion rules"),
-      tags$ul(
-        tags$li("Only leaf mutations can be deleted."),
-        tags$li("Root and internal nodes are protected."),
-        tags$li("Historical mutations cannot fully disappear."),
-        tags$li("New mutations (first appearing now) can be completely removed.")
-      ),
-      
-      hr(),
+      easyClose = FALSE,
+      fade = TRUE,
       
       selectInput(
-        "mutation_to_delete",
-        "Select mutation",
-        choices = setNames(
-          deletable_clones$node_id,
-          paste0("Node ", deletable_clones$node_id,
-                 " | ", deletable_clones$mutation)
-        )
+        "selected_drug_col",
+        "Select drug event",
+        choices = setNames(drug_cols, drug_labels),
+        selected = selected_col
+      ),
+      
+      helpText(
+        "Drug impact rules:",
+        "• 1 = no effect",
+        "• <1 = clone shrinkage",
+        "• >1 = clone expansion",
+        "• Values are automatically rebalanced",
+        "to respect clonal hierarchy constraints."
+      ),
+      
+      h4("Mutation tree"),
+      div(
+        style = "
+          height: 500px;
+          overflow: auto;
+          border: 1px solid #ddd;
+          margin-bottom: 20px;
+        ",
+        grVizOutput("mini_tree", height = "480px")
       ),
       
       hr(),
       
-      h4("What will happen?"),
-      verbatimTextOutput("deletion_preview"),
+      fluidRow(
+        
+        column(
+          7,
+          h4("Drug effect per clone"),
+          div(
+            style = "
+              max-height: 400px;
+              overflow-y: auto;
+              padding-right: 10px;
+            ",
+            radioButtons(
+              "drug_mode",
+              "Impact mode",
+              choices = c(
+                "Same impact for all mutations" = "global",
+                "Specific impact per mutation" = "per_mutation"
+              ),
+              selected = rv$drug_effects[[key]]$mode,
+              inline = FALSE
+            ),
+            uiOutput("drug_numeric_inputs")
+          )
+        ),
+        
+        column(
+          5,
+          h4("Mutation summary"),
+          DTOutput("mini_table")
+        )
+      ),
       
       footer = tagList(
         modalButton("Cancel"),
         actionButton(
-          "confirm_delete_mutation",
-          "Confirm deletion",
-          class = "btn-danger"
+          "confirm_drug_edit",
+          "Apply changes",
+          class = "btn-success"
         )
       )
     )
   )
+  
 })
 
-# Observer for confirming mutation deletion with different scenarios based on whether the mutation first appears at the current timepoint or existed before.
-observeEvent(input$confirm_delete_mutation, {
+# Observer for confirming drug effect edits, which updates the reactive values storing drug effects based on user input and the selected impact mode.
+observeEvent(input$confirm_drug_edit, {
   
-  req(rv$clones_df, input$mutation_to_delete, input$selected_timepoint)
+  req(input$selected_drug_col)
   
-  node_to_delete <- input$mutation_to_delete
-  patient <- input$patient
-  current_tp <- input$selected_timepoint
+  key <- paste(
+    input$patient,
+    input$selected_drug,
+    input$selected_drug_col,
+    sep = "_"
+  )
   
-  patient_timepoints <- rv$clones_df %>%
-    filter(get_patient_id(sample_id) == patient) %>%
-    pull(sample_id) %>%
-    unique() %>%
-    sort()
+  mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
+  node_ids <- rownames(mat)
   
-  first_appearance <- rv$clones_df %>%
-    filter(
-      node_id == node_to_delete,
-      get_patient_id(sample_id) == patient,
-      size_percent > 0
-    ) %>%
-    pull(sample_id) %>%
-    sort() %>%
-    .[1]
-  
-  if (!is.na(first_appearance) && first_appearance == current_tp) {
-    
-    rv$clones_df <- rv$clones_df %>%
-      filter(node_id != node_to_delete)
-    
-    # Clean the drug effect associated
-    rv$drug_effects <- rv$drug_effects[
-      !grepl(paste0("_", node_to_delete, "$"),
-             names(rv$drug_effects))
-    ]
-    
-    # Reindexing nodes
-    rv$clones_df <- reindex_nodes(rv$clones_df)
-    
-    showNotification(
-      paste(
-        "Mutation completely deleted."
-      ),
-      type = "message",
-      duration = 6
+  if (is.null(rv$drug_effects[[key]])) {
+    rv$drug_effects[[key]] <- list(
+      mode = input$drug_mode,
+      global_value = 1,
+      per_mutation = setNames(rep(1, length(node_ids)), node_ids)
     )
+  }
+  
+  rv$drug_effects[[key]]$mode <- input$drug_mode
+  
+  if (input$drug_mode == "global") {
+    
+    rv$drug_effects[[key]]$global_value <- input$drug_global
+    
+    rv$drug_effects[[key]]$per_mutation <-
+      setNames(rep(input$drug_global, length(node_ids)), node_ids)
     
   } else {
     
-    later_timepoints <- patient_timepoints[
-      patient_timepoints >= current_tp
-    ]
+    for (id in node_ids) {
+      rv$drug_effects[[key]]$per_mutation[[id]] <-
+        input[[paste0("drug_", id)]]
+    }
+  }
+  
+  removeModal()
+})
+
+# Add drug observer to allow users to add new drugs to the dataset, which can then be selected for editing drug effects in the fishplot matrix.
+observeEvent(input$add_drug, {
+  
+  showModal(
+    modalDialog(
+      title = "Add new drug",
+      textInput("new_drug_name", "Drug name"),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_add_drug", "Add")
+      )
+    )
+  )
+})
+
+# Confirm add drug observer
+observeEvent(input$confirm_add_drug, {
+  
+  req(input$new_drug_name)
+  
+  rv$available_drugs <- unique(
+    c(rv$available_drugs, input$new_drug_name)
+  )
+  
+  removeModal()
+})
+
+# Drug mode observer to update the drug effect reactive values when the user switches between global and per-mutation impact modes in the drug effect editing modal. 
+# This ensures that the correct input values are displayed and stored based on the selected mode.
+observeEvent(input$drug_mode, {
+  
+  req(input$selected_drug_col)
+  
+  key <- paste(
+    input$patient,
+    input$selected_drug,
+    input$selected_drug_col,
+    sep = "_"
+  )
+  
+  if (!is.null(rv$drug_effects[[key]])) {
+    rv$drug_effects[[key]]$mode <- input$drug_mode
+  }
+  
+})
+observeEvent(
+  {
+    input$selected_drug
+    input$patient
+  },
+  {
     
-    rv$clones_df <- rv$clones_df %>%
-      mutate(
-        size_percent = ifelse(
-          node_id == node_to_delete &
-            sample_id %in% later_timepoints,
-          1e-6,
-          size_percent
+    req(rv$objects, input$patient, input$selected_drug)
+    
+    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
+    if (is.null(mat) || ncol(mat) < 3) return()
+    
+    drug_cols <- seq(2, ncol(mat), by = 2)
+    node_ids <- rownames(mat)
+    
+    for (col in drug_cols) {
+      
+      key <- paste(
+        input$patient,
+        input$selected_drug,
+        col,
+        sep = "_"
+      )
+      
+      if (is.null(rv$drug_effects[[key]])) {
+        
+        rand_val <- generate_random_global_effect()
+        
+        rv$drug_effects[[key]] <- list(
+          mode = "global",
+          global_value = rand_val,
+          per_mutation = setNames(
+            rep(rand_val, length(node_ids)),
+            node_ids
+          )
         )
-      )
-    
-    showNotification(
-      paste(
-        "Mutation biologically suppressed.",
-        "It has been reduced to near-zero from this timepoint onward."
-      ),
-      type = "warning",
-      duration = 8
-    )
+      }
+    }
   }
-  
-  rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
-  rv$objects <- build_all_objects(rv$clones_df)
-  
-  removeModal()
-})
-
-# Observer for handling cell edits in the metadata table, which updates the reactive metadata dataframe based on user modifications.
-observeEvent(input$metadata_table_cell_edit, {
-  
-  info <- input$metadata_table_cell_edit
-  req(info)
-  
-  df_patient <- rv$metadata_df %>%
-    filter(get_patient_id(sample_id) == input$patient)
-  
-  real_col <- colnames(df_patient)[info$col+1] # +1 because DT indexes start at 0
-  
-  real_sample_id <- df_patient$sample_id[info$row]
-  
-  rv$metadata_df[
-    rv$metadata_df$sample_id == real_sample_id,
-    real_col
-  ] <- info$value
-})
-
-# Add metadata field observer
-observeEvent(input$add_metadata_field, {
-  
-  showModal(
-    modalDialog(
-      title = "Add metadata field",
-      textInput("new_meta_name", "Field name"),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_add_meta", "Add", class = "btn-success")
-      )
-    )
-  )
-})
-
-# Confirm add metadata field observer
-observeEvent(input$confirm_add_meta, {
-  
-  req(input$new_meta_name)
-  
-  new_col <- make.names(input$new_meta_name)
-  
-  if (new_col %in% colnames(rv$metadata_df)) {
-    showNotification("Field already exists",
-                     type = "error")
-    return()
-  }
-  
-  rv$metadata_df[[new_col]] <- NA
-  
-  removeModal()
-  
-  showNotification(
-    paste0(
-      "Metadata field '", input$new_meta_name,
-      "' added.\nClick inside the empty cells of this new column to enter values."
-    ),
-    type = "message",
-    duration = 6
-  )
-})
-
-# Delete metadata field observer
-observeEvent(input$delete_metadata_field, {
-  
-  showModal(
-    modalDialog(
-      title = "Delete metadata field",
-      selectInput(
-        "meta_field_to_delete",
-        "Select field",
-        choices = setdiff(colnames(rv$metadata_df), "sample_id")
-      ),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_delete_meta",
-                     "Delete",
-                     class = "btn-danger")
-      )
-    )
-  )
-})
-
-# Confirm delete metadata field observer
-observeEvent(input$confirm_delete_meta, {
-  
-  req(input$meta_field_to_delete)
-  
-  rv$metadata_df[[input$meta_field_to_delete]] <- NULL
-  
-  removeModal()
-  showNotification("Metadata field deleted",
-                   type = "warning")
-})
+)

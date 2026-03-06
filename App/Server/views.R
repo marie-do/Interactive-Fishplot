@@ -189,7 +189,8 @@ output$mini_table <- renderDT({
   df_summary <- rv$clones_df %>%
     filter(get_patient_id(sample_id) == input$patient) %>%
     select(node_id, mutation, parent_id) %>%
-    distinct()
+    distinct() %>%
+    filter(mutation != "root")
   
   datatable(
     df_summary,

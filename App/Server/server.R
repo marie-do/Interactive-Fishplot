@@ -18,6 +18,7 @@ server <- function(input, output, session) {
   source("server/get_depth_first_order.R", local = TRUE)
   source("server/load_file.R", local = TRUE)
   source("server/metadata_observers.R", local = TRUE)
+  source("server/mutations_observers.R", local = TRUE)
   source("server/reindex_nodes.R", local = TRUE)
   source("server/save_load.R", local = TRUE)
   source("server/safe_hierarchy_rebalance.R", local = TRUE)

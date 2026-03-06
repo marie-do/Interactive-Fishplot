@@ -15,6 +15,59 @@ observeEvent(input$add_mutation, {
       title = paste("Add new mutation – Patient", input$patient),
       size = "l",
       
+      div(
+        style = "background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;",
+        
+        h4("Current editing context"),
+        
+        p(
+          strong("IMPORTANT : You are currently editing timepoint: "),
+          strong(input$selected_timepoint)
+        ),
+        
+        br(),
+        
+        p(
+          strong("To change timepoint:"),
+          br(),
+          "Use the timepoint selector in the left sidebar ",
+          "and choose another timepoint before clicking 'Create mutation'."
+        ),
+        
+        hr(),
+        
+        h4("How to create a new mutation"),
+        
+        tags$ol(
+          tags$li(
+            strong("Select a parent node: "),
+            "Choose the clone from which the new mutation evolves."
+          ),
+          tags$li(
+            strong("Enter the mutation name: "),
+            "Example: TP53 R175H."
+          ),
+          tags$li(
+            strong("Set the percentage for the current timepoint: "),
+            "This represents the clone size at ",
+            strong(input$selected_timepoint), "."
+          )
+        ),
+        
+        hr(),
+        
+        p(
+          strong("Important biological rule:"),
+          br(),
+          "• The mutation will appear at the current timepoint.",
+          br(),
+          "• It will be automatically set to 0% at all other timepoints.",
+          br(),
+          "• Parent-child hierarchy constraints will be enforced automatically."
+        )
+      ),
+      
+      
       fluidRow(
         column(
           6,
@@ -71,7 +124,15 @@ observeEvent(input$confirm_add_mutation, {
   removeModal()
   
   # new node ID generation (incremental based on the maximum existing node ID to ensure uniqueness)
-  new_id <- max(as.numeric(rv$clones_df$node_id)) + 1
+  existing_nodes <- rv$clones_df %>%
+    filter(get_patient_id(sample_id) == input$patient) %>%
+    distinct(node_id) %>%
+    pull(node_id) %>%
+    as.numeric()
+  
+  new_id <- max(existing_nodes) + 1
+  new_id <- as.character(new_id)
+  
   new_id <- as.character(new_id)
   
   # New row creation
@@ -173,17 +234,17 @@ observeEvent(input$delete_mutation, {
   
   nodes_with_children <- df_structure$parent_id
   
-  # Only mutations that are active at the current timepoint and do not have children can be deleted, to ensure biological consistency of the tree structure.
-  current_active_nodes <- df_patient %>%
-    filter(sample_id == input$selected_timepoint,
-           size_percent > 0) %>%
+  active_nodes <- df_patient %>%
+    group_by(node_id) %>%
+    summarise(total = sum(size_percent, na.rm = TRUE)) %>%
+    filter(total > 0) %>%
     pull(node_id)
   
   deletable_clones <- df_structure %>%
     filter(
       parent_id != "root",
       !node_id %in% nodes_with_children,
-      node_id %in% current_active_nodes
+      node_id %in% active_nodes
     ) %>%
     arrange(as.numeric(node_id))
   
@@ -199,6 +260,20 @@ observeEvent(input$delete_mutation, {
     modalDialog(
       title = "Delete mutation",
       size = "l",
+      
+      p(
+        strong("IMPORTANT : You are currently editing timepoint: "),
+        strong(input$selected_timepoint)
+      ),
+      
+      br(),
+      
+      p(
+        strong("To change timepoint:"),
+        br(),
+        "Use the timepoint selector in the left sidebar ",
+        "and choose another sample before clicking 'Create mutation'."
+      ),
       
       h4("Deletion rules"),
       tags$ul(
@@ -267,19 +342,8 @@ observeEvent(input$confirm_delete_mutation, {
     rv$clones_df <- rv$clones_df %>%
       filter(node_id != node_to_delete)
     
-    # Clean the drug effect associated
-    rv$drug_effects <- rv$drug_effects[
-      !grepl(paste0("_", node_to_delete, "$"),
-             names(rv$drug_effects))
-    ]
-    
-    # Reindexing nodes
-    rv$clones_df <- reindex_nodes(rv$clones_df)
-    
     showNotification(
-      paste(
-        "Mutation completely deleted."
-      ),
+      "Mutation completely deleted.",
       type = "message",
       duration = 6
     )
@@ -310,7 +374,6 @@ observeEvent(input$confirm_delete_mutation, {
     )
   }
   
-  rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
   rv$objects <- build_all_objects(rv$clones_df)
   
   removeModal()
