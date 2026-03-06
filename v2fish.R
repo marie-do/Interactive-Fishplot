@@ -1,76 +1,220 @@
+
+
+library(shiny)
+library(shinydashboard)
+library(dplyr)
+library(stringr)
+library(DT)
+library(DiagrammeR)
+library(tibble)
+library(jsonlite)
+
+source("fishplot_code2.R")
+source("diagram_shiny.R")
+
+# Build object
+build_all_objects <- function(clones_df) {
+  
+  # Build color palette
+  clone_ids <- clones_df %>%
+    distinct(node_id) %>%
+    arrange(as.numeric(node_id)) %>%
+    pull(node_id)
+  
+  clone_palette_named <- setNames(
+    rep(clone_palette, length.out = length(clone_ids)),
+    clone_ids
+  )
+  
+  # Recompute biological structures
+  mutation_lookup <- build_mutation_lookup(clones_df)
+  all_matrices <- compute_all_cumulative_matrices(clones_df)
+  
+  patient_samples_map <- split(
+    unique(clones_df$sample_id),
+    get_patient_id(unique(clones_df$sample_id))
+  )
+  
+  all_patient_hierarchies <- lapply(
+    names(patient_samples_map),
+    function(p)
+      build_patient_hierarchy(patient_samples_map[[p]], clones_df)
+  )
+  names(all_patient_hierarchies) <- names(patient_samples_map)
+  
+  concat_by_patient_hierarchy <- lapply(
+    names(patient_samples_map),
+    function(p)
+      concat_patient_timepoints_hierarchy(
+        p,
+        patient_samples_map,
+        all_matrices,
+        all_patient_hierarchies
+      )
+  )
+  names(concat_by_patient_hierarchy) <- names(patient_samples_map)
+  
+  # Return everything from the data
+  list(
+    mutation_lookup = mutation_lookup,
+    all_matrices = all_matrices,
+    patient_samples_map = patient_samples_map,
+    all_patient_hierarchies = all_patient_hierarchies,
+    concat_by_patient_hierarchy = concat_by_patient_hierarchy,
+    clone_palette = clone_palette_named
+  )
+}
+generate_random_drug_effects <- function(node_ids) {
+  setNames(
+    runif(length(node_ids), 0.2, 1.2),
+    node_ids
+  )
+}
+get_node_labels <- function(patient, clones_df) {
+  
+  clones_df %>%
+    filter(get_patient_id(sample_id) == patient) %>%
+    distinct(node_id, mutation) %>%
+    arrange(as.numeric(node_id)) %>%
+    mutate(
+      label = paste0(
+        "Node ", node_id,
+        "  |  ",
+        mutation
+      )
+    ) %>%
+    select(node_id, label)
+}
+
+
+#ui
+ui <- dashboardPage(
+  skin = "blue",
+  
+  dashboardHeader(title = "Fishplot Interactive Editor"),
+  
+  dashboardSidebar(
+    width = 300,
+    
+    fileInput(
+      "load_file",
+      "Load JSON data file",
+      accept = ".json"
+    ),
+    
+    downloadButton(
+      "save_file",
+      "Save modified data",
+      class = "btn-success"
+    ),
+    
+    hr(),
+    
+    selectInput(
+      "patient",
+      "Select patient",
+      choices = NULL
+    ),
+    
+    selectInput(
+      "selected_timepoint",
+      "Select timepoint",
+      choices = NULL
+    ),
+    
+    selectInput(
+      "selected_drug",
+      "Select drug",
+      choices = NULL
+    ),
+    
+    actionButton(
+      "new_timepoint",
+      "Create new timepoint",
+      icon = icon("plus"),
+      class = "btn-warning"
+    ),
+    
+    actionButton(
+      "add_mutation",
+      "Create new mutation",
+      icon = icon("plus"),
+      class = "btn-warning"
+    ),
+    
+    actionButton(
+      "edit_all",
+      "Edit all percentages",
+      icon = icon("edit"),
+      class = "btn-info"
+    ),
+    
+    actionButton(
+      "edit_drug_effect",
+      "Edit drug impact",
+      icon = icon("flask"),
+      class = "btn-info"
+    ),
+    
+    actionButton(
+      "delete_timepoint",
+      "Delete timepoint",
+      icon = icon("trash"),
+      class = "btn-danger"
+    ),
+    
+    actionButton(
+      "delete_mutation",
+      "Delete mutation",
+      icon = icon("trash"),
+      class = "btn-danger"
+    ),
+    actionButton(
+      "add_drug",
+      "Add new drug",
+      icon = icon("plus"),
+      class = "btn-primary"
+    ),
+    
+    br(), br(),
+    
+    sidebarMenu(
+      id = "sidebar_menu",
+      menuItem("Visualization", tabName = "viz", icon = icon("chart-area")),
+      menuItem("Data format", tabName = "format", icon = icon("info-circle")),
+      menuItem("Metadata", tabName = "metadata", icon = icon("database"))
+    )
+  ),
+  
+  dashboardBody(
+    tags$head(
+      tags$style(HTML("
+      .modal-lg {
+        width: 90% !important;
+        max-width: 1400px !important;
+      }
+    "))
+    ),
+    fluidRow(
+      column(
+        12,
+        actionButton("show_fish", "FISHPLOT", class = "btn-success"),
+        actionButton("show_tree", "MUTATION TREE", class = "btn-success"),
+        actionButton("show_data", "DATA INFO", class = "btn-success")
+      )
+    ),
+    br(),
+    uiOutput("main_view")
+  )
+)
+
 #server
 
 server <- function(input, output, session) {
   
-  #Reactive Matrix
-  
-  fishplot_matrix_reactive <- reactive({
-    
-    req(input$patient, rv$objects)
-    
-    mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
-    if (is.null(mat)) return(NULL)
-    
-    parents <- rv$objects$all_patient_hierarchies[[input$patient]]$parent_index
-    mat_final <- mat
-    
-    # Fix monotime
-    if (ncol(mat_final) == 1) {
-      
-      original_name <- colnames(mat_final)[1]
-      
-      mat_final <- cbind(mat_final, mat_final)
-      
-      colnames(mat_final) <- c(
-        original_name,
-        paste0(original_name, "_dup")
-      )
-    }
-    
-    # Apply drug effects
-    if (ncol(mat_final) >= 3) {
-      
-      for (col in seq(2, ncol(mat_final) - 1, by = 2)) {
-        
-        key <- paste(input$patient,
-                     input$selected_drug,
-                     col,
-                     sep = "_")
-        
-        effect <- rv$drug_effects[[key]]
-        
-        if (!is.null(effect)) {
-          
-          if (effect$mode == "global") {
-            
-            mat_final[, col] <- mat_final[, col - 1] * effect$global_value
-            
-          } else {
-            
-            for (i in seq_len(nrow(mat_final))) {
-              
-              node_id <- rownames(mat_final)[i]
-              mult <- effect$per_mutation[[node_id]]
-              if (is.null(mult)) mult <- 1
-              
-              mat_final[i, col] <- mat_final[i, col - 1] * mult
-            }
-          }
-        }
-      }
-    }
-    
-    mat_final <- fix_zero_reappearance(mat_final)
-    mat_final <- enforce_fishplot_constraints(mat_final, parents)
-    
-    mat_final[!is.finite(mat_final)] <- 0
-    mat_final[mat_final < 0] <- 0
-    
-    return(mat_final)
-  })
-  
   get_depth_first_order <- function(node_ids, parent_index) {
     
+    # construire map parent → enfants
     children_map <- split(seq_along(parent_index), parent_index)
     
     traverse <- function(idx) {
@@ -101,7 +245,7 @@ server <- function(input, output, session) {
     view = "fish",
     clicked_node = NULL,
     drug_effects = list(),
-    zoom_level = 1,
+    zoom_level = 1
     
   )
   
@@ -122,12 +266,12 @@ server <- function(input, output, session) {
   })
   
   
-  # load file server
+  #load file server
   observeEvent(input$load_file, {
     
     req(input$load_file)
     
-    my_json <- jsonlite::fromJSON(
+    my_json <- fromJSON(
       input$load_file$datapath,
       simplifyVector = FALSE
     )
@@ -140,25 +284,12 @@ server <- function(input, output, session) {
         mutation = ifelse(is.na(mutation), "none", as.character(mutation)),
         sample_id = as.character(sample_id)
       )
-    
     base_metadata_df <- extract_metadata(my_json)
     
     rv$metadata_df <- base_metadata_df
+    
     rv$clones_df <- base_clones_df
     rv$objects <- build_all_objects(base_clones_df)
-    
-    rv$drug_effects <- list()   
-    
-    for (patient in my_json) {
-      
-      if (!is.null(patient$drug_effects)) {
-        
-        rv$drug_effects <- c(
-          rv$drug_effects,
-          patient$drug_effects
-        )
-      }
-    }
     
     updateSelectInput(
       session,
@@ -199,9 +330,7 @@ server <- function(input, output, session) {
       pull(sample_id) %>%
       unique()
     
-    nums <- as.numeric(str_extract(existing, "\\d+$"))
-    nums <- nums[!is.na(nums)]
-    new_idx <- ifelse(length(nums) == 0, 1, max(nums) + 1)
+    new_idx <- max(as.numeric(str_extract(existing, "\\d+$"))) + 1
     new_sample <- paste0(input$patient, "-", sprintf("%03d", new_idx))
     
     base_rows <- rv$clones_df %>%
@@ -258,67 +387,10 @@ server <- function(input, output, session) {
     
     showModal(
       modalDialog(
-        title = paste(
-          "Edit all percentages – Patient",
-          input$patient,
-          "| Timepoint:",
-          input$selected_timepoint
-        ),
+        title = paste("Edit all percentages –", input$selected_timepoint),
         size = "l",
         easyClose = FALSE,
         fade = TRUE,
-        
-        div(
-          style = "background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;",
-          
-          h4("Current editing context"),
-          
-          p(
-            strong("IMPORTANT :You are currently editing timepoint: "),
-            strong(input$selected_timepoint)
-          ),
-          
-          br(),
-          
-          p(
-            strong("To change timepoint:"),
-            br(),
-            "Use the timepoint selector in the left sidebar ",
-            "and select another timepoint before clicking 'Edit all percentages'."
-          ),
-          
-          hr(),
-          
-          h4("How to edit clone percentages"),
-          
-          tags$ol(
-            tags$li(
-              strong("Modify clone percentages in the numeric fields."),
-              " Values must be between 0 and 100."
-            ),
-            tags$li(
-              strong("Parent clones must be ≥ the sum of their children."),
-              " If not, automatic rebalancing will occur."
-            ),
-            tags$li(
-              strong("Click 'Apply changes' to validate.")
-            )
-          ),
-          
-          hr(),
-          
-          p(
-            strong("Important biological rules applied automatically:"),
-            br(),
-            "• Total clone size cannot exceed 100%.",
-            br(),
-            "• Parent-child hierarchy constraints are enforced.",
-            br(),
-            "• Zero reappearance correction is applied.",
-            br(),
-            "• Root clone is fixed at 100%."
-          )
-        ),
         
         # top section with tree
         h4("Mutation tree"),
@@ -432,59 +504,6 @@ server <- function(input, output, session) {
         title = paste("Add new mutation – Patient", input$patient),
         size = "l",
         
-        div(
-          style = "background-color:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;",
-          
-          h4("Current editing context"),
-          
-          p(
-            strong("IMPORTANT : You are currently editing timepoint: "),
-            strong(input$selected_timepoint)
-          ),
-          
-          br(),
-          
-          p(
-            strong("To change timepoint:"),
-            br(),
-            "Use the timepoint selector in the left sidebar ",
-            "and choose another timepoint before clicking 'Create mutation'."
-          ),
-          
-          hr(),
-          
-          h4("How to create a new mutation"),
-          
-          tags$ol(
-            tags$li(
-              strong("Select a parent node: "),
-              "Choose the clone from which the new mutation evolves."
-            ),
-            tags$li(
-              strong("Enter the mutation name: "),
-              "Example: TP53 R175H."
-            ),
-            tags$li(
-              strong("Set the percentage for the current timepoint: "),
-              "This represents the clone size at ",
-              strong(input$selected_timepoint), "."
-            )
-          ),
-          
-          hr(),
-          
-          p(
-            strong("Important biological rule:"),
-            br(),
-            "• The mutation will appear at the current timepoint.",
-            br(),
-            "• It will be automatically set to 0% at all other timepoints.",
-            br(),
-            "• Parent-child hierarchy constraints will be enforced automatically."
-          )
-        ),
-        
-        
         fluidRow(
           column(
             6,
@@ -540,20 +559,7 @@ server <- function(input, output, session) {
     removeModal()
     
     # new node ID generation
-    # IDs existants uniquement pour le patient courant
-    existing_ids <- rv$clones_df %>%
-      filter(get_patient_id(sample_id) == input$patient) %>%
-      pull(node_id) %>%
-      unique() %>%
-      as.numeric()
-    
-    # Sécurité si vide
-    if (length(existing_ids) == 0) {
-      new_id <- 0
-    } else {
-      new_id <- max(existing_ids) + 1
-    }
-    
+    new_id <- max(as.numeric(rv$clones_df$node_id)) + 1
     new_id <- as.character(new_id)
     
     # New row creation
@@ -614,16 +620,17 @@ server <- function(input, output, session) {
     if (input$sidebar_menu == "format") {
       rv$view <- "format"
     }
+    
+    if (input$sidebar_menu == "metadata") {
+      rv$view <- "metadata"
+    }
+    
   })
   
   output$main_view <- renderUI({
     
     if (rv$view == "fish") {
-      introBox(
-        plotOutput("fishplot", height = "700px"),
-        data.step = 11,
-        data.intro = get_step(11)
-      )
+      plotOutput("fishplot", height = "700px")
       
     } else if (rv$view == "tree") {
       tagList(
@@ -635,11 +642,7 @@ server <- function(input, output, session) {
         ),
         div(
           style = "overflow:auto; border:1px solid #ddd;",
-          introBox(
-            grVizOutput("mutation_tree", height = "800px"),
-            data.step = 12,
-            data.intro = get_step(12)
-          )
+          grVizOutput("mutation_tree", height = "800px")
         )
       )
       
@@ -652,14 +655,8 @@ server <- function(input, output, session) {
     else if (rv$view == "metadata") {
       tagList(
         h3(paste("Metadata – Patient", input$patient)),
-        introBox(
-          DTOutput("metadata_table"),
-          data.step = 15,
-          data.intro = get_step(15)
-        ),
-        
+        DTOutput("metadata_table"),
         br(),
-        
         div(
           style = "display:flex; gap:10px;",
           actionButton("add_metadata_field", "Add metadata field", class = "btn-primary"),
@@ -668,29 +665,6 @@ server <- function(input, output, session) {
       )
     }
     
-    else if (rv$view =="matrix") {
-      tagList(
-        h3(paste("Fishplot matrix - Patient", input$patient)),
-        
-        br(),
-        
-        p(strong("Matrix rules applied:")),
-        tags$ul(
-          tags$li("Drug effect applied"),
-          tags$li("Zero reappearance correction"),
-          tags$li("Parent-child constraints enforced"),
-          tags$li("Root constraint enforced")
-        ),
-        
-        br(),
-        
-        introBox(
-          DTOutput("matrix_table"),
-          data.step = 13,
-          data.intro = get_step(13)
-        )
-      )
-    }
     else {
       DTOutput("table")
     }
@@ -747,7 +721,7 @@ server <- function(input, output, session) {
       concat_by_patient_hierarchy = rv$objects$concat_by_patient_hierarchy,
       all_patient_hierarchies = rv$objects$all_patient_hierarchies,
       mutation_lookup = rv$objects$mutation_lookup,
-      clone_palette = global_clone_palette,
+      clone_palette = rv$objects$clone_palette,
       input = input,
       rv = rv,
       mini = FALSE
@@ -815,22 +789,12 @@ server <- function(input, output, session) {
         meta_df <- data.frame(sample_id = unique(df$sample_id))
       }
       
+      
       json_structure <- df %>%
         group_split(patient_id) %>%
         lapply(function(patient_df) {
           
           patient_id_val <- unique(patient_df$patient_id)
-          
-          patient_drug_effects <- rv$drug_effects[
-            startsWith(
-              names(rv$drug_effects),
-              paste0(patient_id_val, "_")
-            )
-          ]
-          
-          if (is.null(patient_drug_effects)) {
-            patient_drug_effects <- list()
-          }
           
           samples_list <- patient_df %>%
             group_split(sample_id) %>%
@@ -862,12 +826,11 @@ server <- function(input, output, session) {
           
           list(
             patient_id = patient_id_val,
-            samples = samples_list,
-            drug_effects = patient_drug_effects   # 🔹 AJOUT ICI
+            samples = samples_list
           )
         })
       
-      jsonlite::write_json(
+      write_json(
         json_structure,
         file,
         pretty = TRUE,
@@ -1055,20 +1018,6 @@ server <- function(input, output, session) {
         title = "Delete mutation",
         size = "l",
         
-        p(
-          strong("IMPORTANT : You are currently editing timepoint: "),
-          strong(input$selected_timepoint)
-        ),
-        
-        br(),
-        
-        p(
-          strong("To change timepoint:"),
-          br(),
-          "Use the timepoint selector in the left sidebar ",
-          "and choose another sample before clicking 'Create mutation'."
-        ),
-        
         h4("Deletion rules"),
         tags$ul(
           tags$li("Only leaf mutations can be deleted."),
@@ -1176,10 +1125,12 @@ server <- function(input, output, session) {
   
   output$drug_numeric_inputs <- renderUI({
     
-    req(rv$clones_df, input$patient, input$selected_drug_col, input$drug_mode)
+    req(rv$clones_df, input$patient, input$selected_drug_col)
     
     mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
     node_ids <- rownames(mat)
+    
+    node_info <- get_node_labels(input$patient, rv$clones_df)
     
     key <- paste(
       input$patient,
@@ -1188,54 +1139,35 @@ server <- function(input, output, session) {
       sep = "_"
     )
     
-    effect <- rv$drug_effects[[key]]
-    
-    if (is.null(effect)) {
-      
-      effect <- list(
-        mode = "global",
-        global_value = 1,
-        per_mutation = setNames(rep(1, length(node_ids)), node_ids)
-      )
-      
-      rv$drug_effects[[key]] <- effect
-    }
-    
-    if (input$drug_mode == "global") {
-      
-      numericInput(
-        "drug_global",
-        "Global drug impact",
-        value = effect$global_value,
-        min = 0,
-        max = 2,
-        step = 0.05
-      )
-      
-    } else {
-      
-      # --- MODE PER MUTATION ---
-      node_info <- get_node_labels(input$patient, rv$clones_df)
-      
-      tagList(
-        lapply(node_ids, function(id) {
-          
-          current_label <- node_info$label[
-            match(id, node_info$node_id)
-          ]
-          
-          numericInput(
-            inputId = paste0("drug_", id),
-            label = current_label,
-            value = effect$per_mutation[[id]],
-            min = 0,
-            max = 2,
-            step = 0.05
-          )
-        })
+    if (is.null(rv$drug_effects[[key]])) {
+      rv$drug_effects[[key]] <- setNames(
+        rep(1, length(node_ids)),
+        node_ids
       )
     }
+    
+    existing_effects <- rv$drug_effects[[key]]
+    
+    tagList(
+      lapply(node_ids, function(id) {
+        
+        current_label <- node_info$label[
+          match(id, node_info$node_id)
+        ]
+        
+        numericInput(
+          inputId = paste0("drug_", id),
+          label = current_label,
+          value = existing_effects[[id]],
+          min = 0,
+          max = 2,
+          step = 0.05
+        )
+      })
+    )
   })
+  
+  
   
   observeEvent(input$edit_drug_effect, {
     
@@ -1297,12 +1229,11 @@ server <- function(input, output, session) {
     
     if (is.null(rv$drug_effects[[key]])) {
       
-      rv$drug_effects[[key]] <- list(
-        mode = "global",
-        global_value = 1,
-        per_mutation = setNames(rep(1, length(node_ids)), node_ids)
-      )
+      random_values <- generate_random_drug_effects(node_ids)
       
+      names(random_values) <- node_ids
+      
+      rv$drug_effects[[key]] <- random_values
     }
     
     showModal(
@@ -1352,16 +1283,6 @@ server <- function(input, output, session) {
               overflow-y: auto;
               padding-right: 10px;
             ",
-              radioButtons(
-                "drug_mode",
-                "Impact mode",
-                choices = c(
-                  "Same impact for all mutations" = "global",
-                  "Specific impact per mutation" = "per_mutation"
-                ),
-                selected = rv$drug_effects[[key]]$mode,
-                inline = FALSE
-              ),
               uiOutput("drug_numeric_inputs")
             )
           ),
@@ -1401,33 +1322,17 @@ server <- function(input, output, session) {
     node_ids <- rownames(mat)
     
     if (is.null(rv$drug_effects[[key]])) {
-      rv$drug_effects[[key]] <- list(
-        mode = input$drug_mode,
-        global_value = 1,
-        per_mutation = setNames(rep(1, length(node_ids)), node_ids)
-      )
+      rv$drug_effects[[key]] <- setNames(rep(1, length(node_ids)), node_ids)
     }
     
-    rv$drug_effects[[key]]$mode <- input$drug_mode
-    
-    if (input$drug_mode == "global") {
-      
-      rv$drug_effects[[key]]$global_value <- input$drug_global
-      
-      rv$drug_effects[[key]]$per_mutation <-
-        setNames(rep(input$drug_global, length(node_ids)), node_ids)
-      
-    } else {
-      
-      for (id in node_ids) {
-        rv$drug_effects[[key]]$per_mutation[[id]] <-
-          input[[paste0("drug_", id)]]
-      }
+    for (id in node_ids) {
+      rv$drug_effects[[key]][id] <- input[[paste0("drug_", id)]]
     }
-    
     
     removeModal()
   })
+  
+  
   
   output$mini_table <- renderDT({
     
@@ -1537,46 +1442,23 @@ server <- function(input, output, session) {
   
   observeEvent(input$delete_metadata_field, {
     
-    # Vérification de l'existence du metadata
-    if (is.null(rv$metadata_df) || ncol(rv$metadata_df) <= 1) {
-      showNotification(
-        "No metadata fields available for deletion.",
-        type = "warning"
-      )
-      return()
-    }
-    
-    selectable_fields <- setdiff(colnames(rv$metadata_df), "sample_id")
-    
-    if (length(selectable_fields) == 0) {
-      showNotification(
-        "No removable metadata fields found.",
-        type = "warning"
-      )
-      return()
-    }
-    
     showModal(
       modalDialog(
         title = "Delete metadata field",
         selectInput(
           "meta_field_to_delete",
           "Select field",
-          choices = selectable_fields
+          choices = setdiff(colnames(rv$metadata_df), "sample_id")
         ),
         footer = tagList(
           modalButton("Cancel"),
-          actionButton(
-            "confirm_delete_meta",
-            "Delete",
-            class = "btn-danger"
-          )
-        ),
-        easyClose = TRUE
+          actionButton("confirm_delete_meta",
+                       "Delete",
+                       class = "btn-danger")
+        )
       )
     )
   })
-  
   observeEvent(input$confirm_delete_meta, {
     
     req(input$meta_field_to_delete)
@@ -1611,146 +1493,6 @@ server <- function(input, output, session) {
     
     removeModal()
   })
-  
-  observeEvent(input$drug_mode, {
-    
-    req(input$selected_drug_col)
-    
-    key <- paste(
-      input$patient,
-      input$selected_drug,
-      input$selected_drug_col,
-      sep = "_"
-    )
-    
-    if (!is.null(rv$drug_effects[[key]])) {
-      rv$drug_effects[[key]]$mode <- input$drug_mode
-    }
-    
-  })
-  observeEvent(
-    {
-      input$selected_drug
-      input$patient
-    },
-    {
-      
-      req(rv$objects, input$patient, input$selected_drug)
-      
-      mat <- rv$objects$concat_by_patient_hierarchy[[input$patient]]
-      if (is.null(mat) || ncol(mat) < 3) return()
-      
-      drug_cols <- seq(2, ncol(mat), by = 2)
-      node_ids <- rownames(mat)
-      
-      for (col in drug_cols) {
-        
-        key <- paste(
-          input$patient,
-          input$selected_drug,
-          col,
-          sep = "_"
-        )
-        
-        if (is.null(rv$drug_effects[[key]])) {
-          
-          rand_val <- generate_random_global_effect()
-          
-          rv$drug_effects[[key]] <- list(
-            mode = "global",
-            global_value = rand_val,
-            per_mutation = setNames(
-              rep(rand_val, length(node_ids)),
-              node_ids
-            )
-          )
-        }
-      }
-    }
-  )
-  observeEvent(input$show_matrix, {
-    rv$view <- "matrix"
-  })
-  
-  output$matrix_table <- renderDT({
-    
-    mat <- fishplot_matrix_reactive()
-    req(mat)
-    
-    df <- as.data.frame(mat)
-    
-    n_cols <- ncol(df)
-    
-    new_names <- character(n_cols)
-    real_tp_index <- 1
-    drug_index <- 1
-    
-    for (i in seq_len(n_cols)) {
-      
-      if (i %% 2 == 1) {
-        new_names[i] <- paste0("t", real_tp_index)
-        real_tp_index <- real_tp_index + 1
-      } else {
-        new_names[i] <- paste0("drug_event_", drug_index)
-        drug_index <- drug_index + 1
-      }
-    }
-    
-    colnames(df) <- new_names
-    
-    df <- tibble::rownames_to_column(df, "Clone")
-    df[, -1] <- round(df[, -1], 4)
-    
-    datatable(
-      df,
-      rownames = FALSE,
-      options = list(
-        scrollX = TRUE,
-        pageLength = nrow(df)
-      )
-    )
-  })
-  
-  # Show intro modal automatically at app launch
-  observeEvent(TRUE, {
-    
-    showModal(
-      modalDialog(
-        includeHTML("intro_text.html"),
-        size = "l",
-        easyClose = TRUE,
-        footer = tagList(
-          actionButton(
-            inputId = "start_intro_tour",
-            label = "Start guided tour",
-            icon = icon("info-circle"),
-            class = "btn-primary"
-          ),
-          modalButton("Close")
-        )
-      )
-    )
-    
-  }, once = TRUE)
-  
-  observeEvent(input$start_intro_tour, {
-    
-    removeModal()
-    
-    introjs(
-      session,
-      options = list(
-        nextLabel = "Continue",
-        prevLabel = "Previous",
-        doneLabel = "Alright. Let's go",
-        showProgress = TRUE,
-        showBullets = FALSE,
-        scrollToElement = TRUE,
-        disableInteraction = TRUE
-      )
-    )
-  })
-  observeEvent(input$Metadata, { 
-    rv$view <- "metadata" 
-  })
 }
+
+shinyApp(ui, server)
