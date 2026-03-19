@@ -125,6 +125,8 @@ concat_patient_timepoints_hierarchy <- function(
   if (length(patient_samples) == 1) {
     
     s <- patient_samples[1]
+    mat <- all_matrices[[s]]
+    
     if (is.null(mat)) {
       message("Matrix NULL for sample: ", s)
     }
@@ -132,7 +134,10 @@ concat_patient_timepoints_hierarchy <- function(
     if (!is.null(mat) && ncol(mat) == 0) {
       message("Matrix with 0 columns for sample: ", s)
     }
-    mat <- all_matrices[[s]]
+    
+    if (is.null(mat) || ncol(mat) == 0 || nrow(mat) == 0) {
+      return(NULL)
+    }
     
     if (is.null(mat) || ncol(mat) == 0 || nrow(mat) == 0) {
       return(NULL)
@@ -159,6 +164,8 @@ concat_patient_timepoints_hierarchy <- function(
   
   lastcols <- lapply(patient_samples, function(s) {
     
+    mat <- all_matrices[[s]]
+    
     if (is.null(mat)) {
       message("Matrix NULL for sample: ", s)
     }
@@ -166,8 +173,6 @@ concat_patient_timepoints_hierarchy <- function(
     if (!is.null(mat) && ncol(mat) == 0) {
       message("Matrix with 0 columns for sample: ", s)
     }
-    
-    mat <- all_matrices[[s]]
     
     if (is.null(mat) || ncol(mat) == 0 || nrow(mat) == 0) {
       return(NULL)

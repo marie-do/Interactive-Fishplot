@@ -340,7 +340,10 @@ observeEvent(input$confirm_delete_mutation, {
   if (!is.na(first_appearance) && first_appearance == current_tp) {
     
     rv$clones_df <- rv$clones_df %>%
-      filter(node_id != node_to_delete)
+      filter(
+        !(node_id == node_to_delete &
+            get_patient_id(sample_id) == patient)
+      )
     
     showNotification(
       "Mutation completely deleted.",
@@ -358,6 +361,7 @@ observeEvent(input$confirm_delete_mutation, {
       mutate(
         size_percent = ifelse(
           node_id == node_to_delete &
+            get_patient_id(sample_id) == patient &
             sample_id %in% later_timepoints,
           1e-6,
           size_percent
@@ -373,6 +377,28 @@ observeEvent(input$confirm_delete_mutation, {
       duration = 8
     )
   }
+  
+  # clean empty clones
+  rv$clones_df <- rv$clones_df %>%
+    group_by(patient = get_patient_id(sample_id)) %>%
+    group_modify(~{
+      
+      df <- .x
+      
+      parent_nodes <- unique(df$parent_id)
+      
+      df %>%
+        group_by(node_id) %>%
+        filter(
+          sum(size_percent, na.rm = TRUE) > 0 |
+            node_id %in% parent_nodes |
+            parent_id == "root"   
+        ) %>%
+        ungroup()
+      
+    }) %>%
+    ungroup()
+
   
   rv$objects <- build_all_objects(rv$clones_df)
   
