@@ -71,7 +71,7 @@ observeEvent(input$edit_all, {
         tags$ol(
           tags$li(
             strong("Modify clone percentages in the numeric fields."),
-            " Values must be between 0 and 100."
+            " Values must be between 0 and 100.Move your mouse cursor over a mutation on the mutation tree to display its name."
           ),
           tags$li(
             strong("Parent clones must be ≥ the sum of their children."),
@@ -168,10 +168,32 @@ observeEvent(input$edit_all, {
 # Confirm bulk edit observer
 observeEvent(input$confirm_bulk_edit, {
   
-  df_tp <- rv$clones_df %>%
-    filter(sample_id == input$selected_timepoint) # retrieve the clones of the current timepoint to get the list of nodes to update, and their current percentages (to fill in the numeric inputs)
+  patient_id <- input$patient
+  selected_tp <- input$selected_timepoint
   
-  for (node in df_tp$node_id) {
+  df_structure <- rv$clones_df %>%
+    filter(get_patient_id(sample_id) == patient_id) %>%
+    distinct(node_id, parent_id, mutation) %>%
+    mutate(node_id = as.character(node_id))
+  
+  df_tp <- rv$clones_df %>%
+    filter(sample_id == selected_tp) %>%
+    mutate(node_id = as.character(node_id))
+  
+  missing_nodes <- setdiff(df_structure$node_id, df_tp$node_id)
+  
+  if (length(missing_nodes) > 0) {
+    rows_to_add <- df_structure %>%
+      filter(node_id %in% missing_nodes) %>%
+      mutate(
+        sample_id = selected_tp,
+        size_percent = 0
+      )
+    
+    rv$clones_df <- bind_rows(rv$clones_df, rows_to_add)
+  }
+  
+  for (node in df_structure$node_id) {
     
     input_id <- paste0("bulk_", node)
     
@@ -179,8 +201,8 @@ observeEvent(input$confirm_bulk_edit, {
       rv$clones_df <- rv$clones_df %>%
         mutate(
           size_percent = ifelse(
-            sample_id == input$selected_timepoint &
-              node_id == node,
+            sample_id == selected_tp &
+              as.character(node_id) == node,
             input[[input_id]],
             size_percent
           )

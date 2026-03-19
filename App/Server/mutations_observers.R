@@ -398,7 +398,7 @@ observeEvent(input$confirm_delete_mutation, {
       
     }) %>%
     ungroup()
-
+  
   
   rv$objects <- build_all_objects(rv$clones_df)
   

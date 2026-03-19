@@ -38,9 +38,19 @@ plot_fishplot <- function(
   
   parents <- all_patient_hierarchies[[patient]]$parent_index
   mat_final <- mat
+  was_monotime_duplicated <- FALSE
+  
+  if (
+    ncol(mat_final) == 2 &&
+    !is.null(colnames(mat_final)) &&
+    grepl("_duplicated$", colnames(mat_final)[2])
+  ) {
+    was_monotime_duplicated <- TRUE
+  }
   
   # FIX MONOTIME BEFORE DRUG
   if (ncol(mat_final) == 1) {
+    was_monotime_duplicated <- TRUE
     mat_final <- cbind(mat_final, mat_final)
   }
   
@@ -76,6 +86,19 @@ plot_fishplot <- function(
     }
   }
   
+  # Apply parent-child constraint fix iteratively after drug effect until convergence
+  if (ncol(mat_final) >= 2) {
+    repeat {
+      mat_before <- mat_final
+      mat_final <- fix_parent_child_conflicts(mat_final, parents)
+      mat_final <- enforce_fishplot_constraints(mat_final, parents)
+      
+      # Check for convergence
+      if (isTRUE(all.equal(mat_final, mat_before, tolerance = 1e-10))) {
+        break
+      }
+    }
+  }
   
   mat_final <- mat_final |>
     fix_zero_reappearance()
@@ -95,17 +118,22 @@ plot_fishplot <- function(
   n_cols <- ncol(mat_final)
   
   x_labels <- character(n_cols)
-  real_tp_index <- 1
-  drug_index <- 1
   
-  for (i in seq_len(n_cols)) {
+  if (was_monotime_duplicated && n_cols == 2) {
+    x_labels <- c("t1", "duplicated t1")
+  } else {
+    real_tp_index <- 1
+    drug_index <- 1
     
-    if (i %% 2 == 1) {
-      x_labels[i] <- paste0("t", real_tp_index)
-      real_tp_index <- real_tp_index + 1
-    } else {
-      x_labels[i] <- paste0("drug_event_", drug_index)
-      drug_index <- drug_index + 1
+    for (i in seq_len(n_cols)) {
+      
+      if (i %% 2 == 1) {
+        x_labels[i] <- paste0("t", real_tp_index)
+        real_tp_index <- real_tp_index + 1
+      } else {
+        x_labels[i] <- paste0("drug_event_", drug_index)
+        drug_index <- drug_index + 1
+      }
     }
   }
   

@@ -20,15 +20,6 @@ output$main_view <- renderUI({
   if (rv$view == "fish") {
     
     tagList(
-      div(
-        style = "margin-bottom:10px;",
-        actionButton(
-          "rename_events",
-          "Rename events",
-          icon = icon("edit"),
-          class = "btn-primary"
-        )
-      ),
       plotOutput("fishplot", height = "700px")
     )
   } else if (rv$view == "tree") {
