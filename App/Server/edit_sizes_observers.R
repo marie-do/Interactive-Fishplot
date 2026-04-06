@@ -12,10 +12,9 @@ observeEvent(input$edit_all, {
   ordered_nodes <- get_depth_first_order(node_ids, parents)
   
   # Build a dataframe with all nodes for the patient, their mutations, and their current percentages at the selected timepoint (or 0 if not present), ordered by the depth-first order of the tree structure.
-  df_structure <- rv$clones_df %>%
-    filter(get_patient_id(sample_id) == patient_id) %>%
-    distinct(node_id, mutation) %>%
-    mutate(node_id = as.character(node_id))
+  df_structure <- tibble(
+    node_id = as.character(ordered_nodes)
+  )
   
   df_tp_values <- rv$clones_df %>%
     filter(sample_id == input$selected_timepoint) %>%
@@ -26,12 +25,33 @@ observeEvent(input$edit_all, {
     left_join(df_tp_values, by = "node_id") %>%
     mutate(
       size_percent = ifelse(is.na(size_percent), 0, size_percent),
-      node_id = factor(node_id, levels = ordered_nodes)
+      order_idx = match(node_id, ordered_nodes)
     ) %>%
-    arrange(node_id)
+    filter(!is.na(order_idx)) %>%
+    arrange(order_idx)
   
   
-  node_info <- get_node_labels(input$patient, rv$clones_df)
+  node_info <- rv$clones_df %>%
+    filter(get_patient_id(sample_id) == patient_id) %>%
+    mutate(
+      node_id = as.character(node_id),
+      is_selected_tp = sample_id == input$selected_timepoint,
+      tp_num = get_suffix_num(sample_id)
+    ) %>%
+    arrange(node_id, desc(is_selected_tp), tp_num) %>%
+    group_by(node_id) %>%
+    summarise(
+      mutation = {
+        vals <- mutation[
+          !is.na(mutation) &
+            mutation != "" &
+            mutation != "none"
+        ]
+        if (length(vals) == 0) "none" else dplyr::first(vals)
+      },
+      .groups = "drop"
+    ) %>%
+    mutate(label = paste0("Node ", node_id, " | ", mutation))
   
   showModal(
     modalDialog(
@@ -126,7 +146,7 @@ observeEvent(input$edit_all, {
             tagList(
               lapply(seq_len(nrow(df_tp)), function(i) {
                 
-                current_node <- df_tp$node_id[i]
+                current_node <- as.character(df_tp$node_id[i])
                 
                 current_label <- node_info$label[
                   match(current_node, node_info$node_id)
