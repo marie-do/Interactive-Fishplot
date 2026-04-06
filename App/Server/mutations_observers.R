@@ -157,6 +157,58 @@ observeEvent(input$confirm_add_mutation, {
     return()
   }
   
+  parent_eps <- 1e-6
+  parent_rows_current_tp <- rv$clones_df %>%
+    filter(
+      sample_id == input$selected_timepoint,
+      as.character(node_id) == as.character(input$new_parent)
+    )
+  
+  parent_row_missing <- nrow(parent_rows_current_tp) == 0
+  parent_was_zero <- !parent_row_missing &&
+    any(is.na(parent_rows_current_tp$size_percent) |
+          parent_rows_current_tp$size_percent <= 0)
+  
+  if (parent_row_missing) {
+    parent_template <- rv$clones_df %>%
+      filter(
+        get_patient_id(sample_id) == input$patient,
+        as.character(node_id) == as.character(input$new_parent)
+      ) %>%
+      slice(1)
+    
+    if (nrow(parent_template) == 1) {
+      parent_template <- parent_template %>%
+        mutate(
+          sample_id = input$selected_timepoint,
+          size_percent = parent_eps
+        )
+      
+      rv$clones_df <- bind_rows(rv$clones_df, parent_template)
+    }
+  }
+  
+  if (parent_was_zero) {
+    rv$clones_df <- rv$clones_df %>%
+      mutate(
+        size_percent = ifelse(
+          sample_id == input$selected_timepoint &
+            as.character(node_id) == as.character(input$new_parent) &
+            (is.na(size_percent) | size_percent <= 0),
+          parent_eps,
+          size_percent
+        )
+      )
+  }
+  
+  if (parent_row_missing || parent_was_zero) {
+    showNotification(
+      "Parent was missing or 0% at this timepoint and has been automatically set to a very low value.",
+      type = "message",
+      duration = 6
+    )
+  }
+  
   patient_samples <- rv$clones_df %>%
     filter(get_patient_id(sample_id) == input$patient) %>%
     pull(sample_id) %>%
