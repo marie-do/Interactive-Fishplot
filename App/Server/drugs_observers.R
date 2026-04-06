@@ -36,16 +36,22 @@ output$drug_numeric_inputs <- renderUI({
   
   effect <- rv$drug_effects[[key]]
   
-  if (is.null(effect)) {
+  if (is.null(effect$per_mutation)) {
+    effect$per_mutation <- setNames(rep(1, length(node_ids)), node_ids)
+  } else {
+    missing_ids <- setdiff(node_ids, names(effect$per_mutation))
+    extra_ids   <- setdiff(names(effect$per_mutation), node_ids)
     
-    effect <- list(
-      mode = "global",
-      global_value = 1,
-      per_mutation = setNames(rep(1, length(node_ids)), node_ids)
-    )
+    if (length(missing_ids) > 0) {
+      effect$per_mutation[missing_ids] <- 1
+    }
     
-    rv$drug_effects[[key]] <- effect
+    if (length(extra_ids) > 0) {
+      effect$per_mutation <- effect$per_mutation[node_ids]
+    }
   }
+  
+  rv$drug_effects[[key]] <- effect
   
   if (input$drug_mode == "global") { # If global mode is selected, display a single numeric input to control the overall drug impact on all mutations simultaneously.
     numericInput(
