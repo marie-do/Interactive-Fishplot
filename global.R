@@ -108,7 +108,7 @@ normalize_timepoint_percentages <- function(df) {
       total = sum(size_percent, na.rm = TRUE),
       size_percent = ifelse(
         total > 0 & abs(total - 100) > 1e-8,
-        size_percent / total * 100,
+        round(size_percent / total * 100, 10),
         size_percent
       )
     ) %>%

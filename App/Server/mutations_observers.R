@@ -234,6 +234,32 @@ observeEvent(input$confirm_add_mutation, {
   rv$objects <- build_all_objects(rv$clones_df)
 })
 
+get_mutation_first_appearance_tp_num <- function(clones_df, target_node_id, patient, patient_timepoints_df) {
+  patient_ids <- sub("^(.*)-[^-]+$", "\\1", clones_df$sample_id)
+  target_rows <- clones_df[
+    clones_df$node_id == target_node_id &
+      patient_ids == patient &
+      clones_df$size_percent > 0,
+  ]
+  
+  if (nrow(target_rows) == 0) {
+    return(NA_real_)
+  }
+  
+  joined_rows <- merge(target_rows, patient_timepoints_df, by = "sample_id")
+  
+  if (nrow(joined_rows) == 0) {
+    return(NA_real_)
+  }
+  
+  min(joined_rows$tp_num, na.rm = TRUE)
+}
+
+normalize_root_mutations <- function(df) {
+  df$mutation[df$parent_id == "root"] <- "none"
+  df
+}
+
 # Deletion helper text
 output$deletion_preview <- renderText({
   
@@ -243,17 +269,32 @@ output$deletion_preview <- renderText({
   patient <- input$patient
   current_tp <- input$selected_timepoint
   
-  first_appearance <- rv$clones_df %>%
-    filter(
-      node_id == node,
-      get_patient_id(sample_id) == patient,
-      size_percent > 0
-    ) %>%
+  patient_timepoints_df <- rv$clones_df %>%
+    filter(get_patient_id(sample_id) == patient) %>%
     pull(sample_id) %>%
-    sort() %>%
-    .[1]
+    unique() %>%
+    tibble(sample_id = .) %>%
+    mutate(tp_num = suppressWarnings(get_suffix_num(sample_id))) %>%
+    filter(!is.na(tp_num)) %>%
+    arrange(tp_num)
   
-  if (!is.na(first_appearance) && first_appearance == current_tp) {
+  current_tp_num <- patient_timepoints_df %>%
+    filter(sample_id == current_tp) %>%
+    pull(tp_num) %>%
+    dplyr::first()
+  
+  if (is.na(current_tp_num)) {
+    current_tp_num <- suppressWarnings(get_suffix_num(current_tp))
+  }
+  
+  first_appearance_num <- get_mutation_first_appearance_tp_num(
+    rv$clones_df,
+    node,
+    patient,
+    patient_timepoints_df
+  )
+  
+  if (is.na(first_appearance_num) || first_appearance_num == current_tp_num) {
     
     paste(
       "This mutation first appears at the current timepoint.",
@@ -373,23 +414,32 @@ observeEvent(input$confirm_delete_mutation, {
   patient <- input$patient
   current_tp <- input$selected_timepoint
   
-  patient_timepoints <- rv$clones_df %>%
+  patient_timepoints_df <- rv$clones_df %>%
     filter(get_patient_id(sample_id) == patient) %>%
     pull(sample_id) %>%
     unique() %>%
-    sort()
+    tibble(sample_id = .) %>%
+    mutate(tp_num = suppressWarnings(get_suffix_num(sample_id))) %>%
+    filter(!is.na(tp_num)) %>%
+    arrange(tp_num)
   
-  first_appearance <- rv$clones_df %>%
-    filter(
-      node_id == node_to_delete,
-      get_patient_id(sample_id) == patient,
-      size_percent > 0
-    ) %>%
-    pull(sample_id) %>%
-    sort() %>%
-    .[1]
+  current_tp_num <- patient_timepoints_df %>%
+    filter(sample_id == current_tp) %>%
+    pull(tp_num) %>%
+    dplyr::first()
   
-  if (!is.na(first_appearance) && first_appearance == current_tp) {
+  if (is.na(current_tp_num)) {
+    current_tp_num <- suppressWarnings(get_suffix_num(current_tp))
+  }
+  
+  first_appearance_num <- get_mutation_first_appearance_tp_num(
+    rv$clones_df,
+    node_to_delete,
+    patient,
+    patient_timepoints_df
+  )
+  
+  if (is.na(first_appearance_num) || first_appearance_num == current_tp_num) {
     
     rv$clones_df <- rv$clones_df %>%
       filter(
@@ -405,9 +455,9 @@ observeEvent(input$confirm_delete_mutation, {
     
   } else {
     
-    later_timepoints <- patient_timepoints[
-      patient_timepoints >= current_tp
-    ]
+    later_timepoints <- patient_timepoints_df %>%
+      filter(tp_num >= current_tp_num) %>%
+      pull(sample_id)
     
     rv$clones_df <- rv$clones_df %>%
       mutate(
@@ -430,28 +480,8 @@ observeEvent(input$confirm_delete_mutation, {
     )
   }
   
-  # clean empty clones
-  rv$clones_df <- rv$clones_df %>%
-    group_by(patient = get_patient_id(sample_id)) %>%
-    group_modify(~{
-      
-      df <- .x
-      
-      parent_nodes <- unique(df$parent_id)
-      
-      df %>%
-        group_by(node_id) %>%
-        filter(
-          sum(size_percent, na.rm = TRUE) > 0 |
-            node_id %in% parent_nodes |
-            parent_id == "root"   
-        ) %>%
-        ungroup()
-      
-    }) %>%
-    ungroup()
-  
-  
+  rv$clones_df <- normalize_timepoint_percentages(rv$clones_df)
+  rv$clones_df <- normalize_root_mutations(rv$clones_df)
   rv$objects <- build_all_objects(rv$clones_df)
   
   removeModal()
