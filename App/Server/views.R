@@ -14,6 +14,21 @@ observeEvent(input$sidebar_menu, {
   }
 })
 
+resolve_runtime_path <- function(relative_path) {
+  candidate_paths <- c(
+    file.path("..", relative_path),
+    relative_path
+  )
+
+  existing_paths <- candidate_paths[file.exists(candidate_paths)]
+
+  if (length(existing_paths) == 0) {
+    stop(paste("File not found:", relative_path))
+  }
+
+  existing_paths[[1]]
+}
+
 # Global display area + parameters 
 output$main_view <- renderUI({
   
@@ -38,7 +53,10 @@ output$main_view <- renderUI({
     )
     
   } else if (rv$view == "format") {
-    box(width = 12, includeMarkdown("../texts_and_extras/data_format.md"))
+    box(
+      width = 12,
+      includeMarkdown(resolve_runtime_path(file.path("texts_and_extras", "data_format.md")))
+    )
     
   } else if (rv$view == "metadata") {
     tagList(
@@ -176,6 +194,8 @@ output$mutation_tree <- renderGrViz({
 
 # Minitable in the drug effect editing modal to summarize the mutations and their current percentages at the selected tiemepoint.
 output$mini_table <- renderDT({
+
+  req(rv$clones_df, input$patient)
   
   df_summary <- rv$clones_df %>%
     filter(get_patient_id(sample_id) == input$patient) %>%
