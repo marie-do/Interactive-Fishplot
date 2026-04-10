@@ -1,0 +1,10 @@
+name: interactive-fishplot
+title:
+username: madrigo08
+account: madrigo08
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 17100425
+bundleId: 11830354
+url: https://madrigo08.shinyapps.io/interactive-fishplot/
+version: 1

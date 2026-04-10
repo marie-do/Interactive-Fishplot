@@ -38,7 +38,7 @@ output$main_view <- renderUI({
     )
     
   } else if (rv$view == "format") {
-    box(width = 12, includeMarkdown("../Texts_and_Extras/data_format.md"))
+    box(width = 12, includeMarkdown("../texts_and_extras/data_format.md"))
     
   } else if (rv$view == "metadata") {
     tagList(
@@ -251,28 +251,6 @@ output$matrix_table <- renderDT({
     )
   )
 })
-
-# Show intro modal automatically at app launch
-observeEvent(TRUE, {
-  
-  showModal(
-    modalDialog(
-      includeHTML("../Texts_and_Extras/intro_text.html"),
-      size = "l",
-      easyClose = TRUE,
-      footer = tagList(
-        actionButton(
-          inputId = "start_intro_tour",
-          label = "Start guided tour",
-          icon = icon("info-circle"),
-          class = "btn-primary"
-        ),
-        modalButton("Close")
-      )
-    )
-  )
-  
-}, once = TRUE)
 
 #Intro tour observer 
 observeEvent(input$start_intro_tour, {

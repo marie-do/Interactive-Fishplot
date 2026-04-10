@@ -7,18 +7,6 @@ rv$available_drugs <- c(
   "Azacitidine"
 )
 
-# Drug observer to update drug selection choices
-observe({
-  if (!is.null(rv$available_drugs) && length(rv$available_drugs) > 0) {
-    updateSelectInput(
-      session,
-      "selected_drug",
-      choices = rv$available_drugs,
-      selected = rv$available_drugs[1]
-    )
-  }
-})
-
 # Dynamic UI for drug effect inputs, which updates based on the selected drug event and impact mode (global vs per-mutation).
 output$drug_numeric_inputs <- renderUI({
   

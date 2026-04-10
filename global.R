@@ -5,17 +5,20 @@ set.seed(123)
 # Core dependencies
 source(file.path("..","dependencies.R"))
 
-# If fishplot is installed, silence fishplot_set_up.R. If it's not, install fishplot manually.
-
-
 if (requireNamespace("fishplot", quietly = TRUE)) {
   library(fishplot)
 } else {
   source(file.path("..", "fishplot_manual_setup", "fishplot_set_up.R"))
 }
 
-source(file.path("..","Fishplot_code","fishplot_code.R"))
-source(file.path("..","Mutation_Tree_Code","mutation_tree_code.R"))
+source(file.path("..","functions","01_json_extraction.R"))
+source(file.path("..","functions","02_tree_building.R"))
+source(file.path("..","functions","03_matrices.R"))
+source(file.path("..","functions","04_patient_hierarchy.R"))
+source(file.path("..","functions","05_constraints.R"))
+source(file.path("..","functions","06_palette_labels.R"))
+source(file.path("..","functions","07_plot_fishplot.R"))
+source(file.path("..","mutation_tree_code","mutation_tree_code.R"))
 
 
 #Main function to build all objects needed for the app
@@ -89,7 +92,7 @@ get_node_labels <- function(patient, clones_df) {
 }
 
 intro_steps <- read_delim(
-  file.path("..", "Texts_and_Extras", "fishplot_tour.csv"),
+  file.path("..", "texts_and_extras", "fishplot_tour.csv"),
   delim = ";",
   col_types = cols()
 )

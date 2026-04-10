@@ -1,7 +1,7 @@
 # ui
 
 help_steps <- read_delim(
-  file.path("..","Texts_and_Extras","help_tour.csv"),
+  file.path("..","texts_and_extras","help_tour.csv"),
   delim=";",
   col_types = cols(.default="c"),
   trim_ws = TRUE
@@ -118,7 +118,8 @@ ui <- dashboardPage(
       selectInput(
         "selected_drug",
         "Select drug",
-        choices = NULL
+        choices = c("Midostaurin", "Venetoclax", "Cytarabine", "Azacitidine"),
+        selected = "Midostaurin"
       ),
       data.step = 5,
       data.intro = get_step(5)

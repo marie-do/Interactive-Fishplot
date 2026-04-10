@@ -35,10 +35,16 @@ for(file in other_files) {
 
 required_packages <- c("ape", "gtools")
 for(pkg in required_packages) {
-  if(!require(pkg, character.only = TRUE)) {
-    install.packages(pkg)
-    library(pkg, character.only = TRUE)
+  if(!requireNamespace(pkg, quietly = TRUE)) {
+    stop(
+      paste0(
+        "Missing package '",
+        pkg,
+        "' required for fallback fishplot setup. Install it before deployment."
+      )
+    )
   }
+  library(pkg, character.only = TRUE)
 }
 
 cat("Setup complete! You can now use fishplot.\n")

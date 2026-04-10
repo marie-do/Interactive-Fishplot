@@ -1,54 +1,5 @@
-# List of required packages for the app + fishplot code
-# If fishplot can be installed from GitHub, try the step 1 first:
-
-# Step 1: Try to install fishplot from GitHub 
-
-fishplot_available <- requireNamespace("fishplot", quietly = TRUE)
-
-if (!fishplot_available) {
-  
-  message("fishplot not found. Attempting GitHub installation...")
-  
-  # Ensure devtools is installed
-  if (!requireNamespace("devtools", quietly = TRUE)) {
-    tryCatch({
-      install.packages("devtools")
-    }, error = function(e) {
-      message("devtools installation failed:")
-      message(e$message)
-    })
-  }
-  
-  # Try installing fishplot
-  tryCatch({
-    
-    devtools::install_github(
-      "chrisamiller/fishplot",
-      upgrade = "never",
-      dependencies = TRUE,
-      quiet = TRUE
-    )
-    
-    message("fishplot GitHub installation completed.")
-    
-  }, error = function(e) {
-    
-    message("GitHub installation of fishplot failed:")
-    message(e$message)
-    
-  })
-}
-
-# Re-check AFTER installation attempt
-fishplot_available <- requireNamespace("fishplot", quietly = TRUE)
-
-# Load ONLY if truly available
-if (fishplot_available) {
-  library(fishplot)
-  message("fishplot loaded successfully.")
-} else {
-  message("fishplot not available. It will be installed manually latter.")
-}
+# Production-safe dependency loader.
+# Important: never install packages at app startup on shinyapps.io.
 
 required_packages <- c(
   "jsonlite",
@@ -68,15 +19,19 @@ required_packages <- c(
   "methods"
 )
 
-# install missing packages
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, FUN.VALUE = logical(1), quietly = TRUE)
+]
 
-new.packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
-
-if (length(new.packages)) {
-  install.packages(new.packages)
+if (length(missing_packages) > 0) {
+  stop(
+    paste0(
+      "Missing required R packages: ",
+      paste(missing_packages, collapse = ", "),
+      ". Install them before running/deploying the app."
+    )
+  )
 }
-
-rm(new.packages)
 
 library(jsonlite)
 library(dplyr)
@@ -91,6 +46,5 @@ library(shinydashboard)
 library(stringr)
 library(DT)
 library(DiagrammeR)
-library(dplyr)
 library(markdown)
 library(methods)

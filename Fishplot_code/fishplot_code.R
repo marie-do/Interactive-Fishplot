@@ -4,13 +4,13 @@ set.seed(123)
 
 source(file.path("..","dependencies.R"))
 
-source(file.path("..","Functions","01_json_extraction.R"))
-source(file.path("..","Functions","02_tree_building.R"))
-source(file.path("..","Functions","03_matrices.R"))
-source(file.path("..","Functions","04_patient_hierarchy.R"))
-source(file.path("..","Functions","05_constraints.R"))
-source(file.path("..","Functions","06_palette_labels.R"))
-source(file.path("..","Functions","07_plot_fishplot.R"))
+source(file.path("..","functions","01_json_extraction.R"))
+source(file.path("..","functions","02_tree_building.R"))
+source(file.path("..","functions","03_matrices.R"))
+source(file.path("..","functions","04_patient_hierarchy.R"))
+source(file.path("..","functions","05_constraints.R"))
+source(file.path("..","functions","06_palette_labels.R"))
+source(file.path("..","functions","07_plot_fishplot.R"))
 
 invisible(
   lapply(

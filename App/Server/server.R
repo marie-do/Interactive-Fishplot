@@ -12,7 +12,7 @@ server <- function(input, output, session) {
     event_labels = list()
   )
   # Load modules
-  source("Server/drugs_observers.R", local = TRUE)
+  source("server/drugs_observers.R", local = TRUE)
   source("server/edit_sizes_observers.R", local = TRUE)
   source("server/fishplot_matrix_reactive.R", local = TRUE)
   source("server/get_depth_first_order.R", local = TRUE)
